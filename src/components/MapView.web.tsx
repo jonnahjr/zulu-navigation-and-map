@@ -24,41 +24,11 @@ const CustomMapView: React.FC<MapViewProps> = ({ route, originLngLat, destinatio
   // Default center is Addis Ababa (latitude,longitude)
   const defaultCenter = initialRegion ? `${initialRegion.latitude},${initialRegion.longitude}` : '9.03,38.74';
   const center = route && route.length > 0 ? `${route[0].latitude},${route[0].longitude}` : defaultCenter;
-  const GOOGLE_KEY = process.env.GOOGLE_PLACES_KEY || '';
-  const [googleError, setGoogleError] = useState<string | null>(null);
-  const [lastFly, setLastFly] = useState<string | null>(null);
 
-  const MapErrorBanner: React.FC<{ reason: string }> = ({ reason }) => (
-    <div style={{ position: 'absolute', top: 8, left: 8, right: 8, zIndex: 1000 }}>
-      <div style={{ background: 'rgba(255,69,58,0.95)', color: '#fff', padding: '8px 12px', borderRadius: 8, fontWeight: 700 }}>
-        Google Maps unavailable ({reason}). Falling back to OpenStreetMap.
-      </div>
-    </div>
-  );
-
-  if (!GOOGLE_KEY || googleError) {
-    // fall back to OSM embed
-    return (
-      <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-        {googleError && <MapErrorBanner reason={googleError} />}
-        <MapLibreFallback center={center} />
-      </div>
-    );
-  }
-
+  // Use OpenStreetMap fallback for consistency with free APIs
   return (
-    <div style={{ width: '100%', height: '100%' }}>
-      <GoogleMapWeb
-        originLngLat={originLngLat}
-        destinationLngLat={destinationLngLat}
-        flyTo={flyTo}
-        onFlyComplete={onFlyComplete}
-        onRoute={() => { /* parent MapView handles route states elsewhere */ }}
-        onError={(reason: string) => {
-          console.warn('GoogleMap reported error:', reason);
-          setGoogleError(reason);
-        }}
-      />
+    <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+      <MapLibreFallback center={center} />
     </div>
   );
 };

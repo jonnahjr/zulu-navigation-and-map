@@ -1,26 +1,29 @@
 import axios from 'axios';
 
-// For native (Expo) builds we pick up the key from env; for web we call the local proxy which uses the server key
-const GOOGLE_PLACES_API_KEY = process.env.GOOGLE_PLACES_API_KEY || 'YOUR_GOOGLE_PLACES_API_KEY'; // Replace or set in .env
+// Use free APIs: Nominatim for places, Mapbox for directions
+const MAPBOX_ACCESS_TOKEN = process.env.MAPBOX_ACCESS_TOKEN || '';
 
 export const getPlacePredictions = async (input: string) => {
-  const url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(input)}&key=${GOOGLE_PLACES_API_KEY}`;
+  const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(input)}&limit=10`;
   const res = await axios.get(url);
-  return res.data.predictions.map((p: any) => ({ place_id: p.place_id, description: p.description }));
+  return res.data.map((p: any) => ({ place_id: (p.osm_type ? p.osm_type[0].toUpperCase() : 'N') + p.osm_id, description: p.display_name }));
 };
 
 export const getPlaceDetails = async (placeId: string) => {
-  const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&key=${GOOGLE_PLACES_API_KEY}`;
+  const url = `https://nominatim.openstreetmap.org/lookup?format=json&osm_ids=${encodeURIComponent(placeId)}`;
   const res = await axios.get(url);
-  const r = res.data.result;
-  return {
-    name: r.name,
-    location: { latitude: r.geometry.location.lat, longitude: r.geometry.location.lng },
-    address: r.formatted_address,
-    rating: r.rating,
-    opening_hours: r.opening_hours,
-    types: r.types,
-  };
+  if (res.data.length > 0) {
+    const r = res.data[0];
+    return {
+      name: r.display_name.split(',')[0],
+      location: { latitude: parseFloat(r.lat), longitude: parseFloat(r.lon) },
+      address: r.display_name,
+      rating: null,
+      opening_hours: null,
+      types: [r.type],
+    };
+  }
+  throw new Error('Place not found');
 };
 
 export function distanceMeters(a: { latitude: number; longitude: number }, b: { latitude: number; longitude: number }) {
@@ -39,17 +42,20 @@ export function distanceMeters(a: { latitude: number; longitude: number }, b: { 
 
 export const getNearbyPlaces = async (location: { latitude: number; longitude: number }, type: string, radius: number = 1500) => {
   try {
-    const isWeb = typeof window !== 'undefined' && typeof window.document !== 'undefined';
-    if (isWeb) {
-      const url = `/api/places/nearby?location=${location.latitude},${location.longitude}&radius=${radius}${type ? `&type=${encodeURIComponent(type)}` : ''}`;
-      const res = await axios.get(url);
-      if (res.data.status !== 'OK') throw new Error(res.data.status || 'error');
-      return res.data.results.map((place: any) => ({ id: place.place_id, name: place.name, location: place.geometry.location, vicinity: place.vicinity, opening_hours: place.opening_hours, rating: place.rating, price_level: place.price_level }));
-    }
-    const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${location.latitude},${location.longitude}&radius=${radius}&type=${type}&key=${GOOGLE_PLACES_API_KEY}`;
+    const delta = radius / 111000; // approx degrees for radius in meters
+    const viewbox = `${location.longitude - delta},${location.latitude - delta},${location.longitude + delta},${location.latitude + delta}`;
+    const q = type ? `${type}` : '';
+    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&viewbox=${viewbox}&bounded=1&limit=20`;
     const res = await axios.get(url);
-    if (res.data.status !== 'OK') throw new Error(res.data.status);
-    return res.data.results.map((place: any) => ({ id: place.place_id, name: place.name, location: place.geometry.location, vicinity: place.vicinity, opening_hours: place.opening_hours, rating: place.rating, price_level: place.price_level }));
+    return res.data.map((place: any) => ({
+      id: (place.osm_type ? place.osm_type[0].toUpperCase() : 'N') + place.osm_id,
+      name: place.display_name.split(',')[0],
+      location: { lat: parseFloat(place.lat), lng: parseFloat(place.lon) },
+      vicinity: place.display_name,
+      opening_hours: null,
+      rating: null,
+      price_level: null
+    }));
   } catch (error) {
     console.error('Error fetching nearby places:', error);
     throw error;
@@ -58,16 +64,17 @@ export const getNearbyPlaces = async (location: { latitude: number; longitude: n
 
 export const getGlobalPlaces = async (query: string) => {
   try {
-    const isWeb = typeof window !== 'undefined' && typeof window.document !== 'undefined';
-    if (isWeb) {
-      const res = await axios.get(`/api/places/textsearch?query=${encodeURIComponent(query)}`);
-      if (res.data.status !== 'OK') throw new Error(res.data.status || 'error');
-      return res.data.results.map((place: any) => ({ id: place.place_id, name: place.name, location: place.geometry.location, vicinity: place.formatted_address, opening_hours: place.opening_hours, rating: place.rating, price_level: place.price_level }));
-    }
-    const url = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(query)}&key=${GOOGLE_PLACES_API_KEY}`;
+    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=20`;
     const res = await axios.get(url);
-    if (res.data.status !== 'OK') throw new Error(res.data.status);
-    return res.data.results.map((place: any) => ({ id: place.place_id, name: place.name, location: place.geometry.location, vicinity: place.formatted_address, opening_hours: place.opening_hours, rating: place.rating, price_level: place.price_level }));
+    return res.data.map((place: any) => ({
+      id: (place.osm_type ? place.osm_type[0].toUpperCase() : 'N') + place.osm_id,
+      name: place.display_name.split(',')[0],
+      location: { lat: parseFloat(place.lat), lng: parseFloat(place.lon) },
+      vicinity: place.display_name,
+      opening_hours: null,
+      rating: null,
+      price_level: null
+    }));
   } catch (error) {
     console.error('Error fetching global places:', error);
     throw error;
@@ -75,11 +82,10 @@ export const getGlobalPlaces = async (query: string) => {
 };
 
 export const getDirections = async (origin: { latitude: number; longitude: number }, destination: { latitude: number; longitude: number }, mode: 'driving' | 'walking' | 'transit' | 'bicycling' = 'driving') => {
-  const originStr = `${origin.latitude},${origin.longitude}`;
-  const destStr = `${destination.latitude},${destination.longitude}`;
-  // In web builds, call local proxy to avoid Google CORS restrictions
-  const isWeb = typeof window !== 'undefined' && typeof window.document !== 'undefined';
-  const url = isWeb ? `/api/directions?origin=${encodeURIComponent(originStr)}&destination=${encodeURIComponent(destStr)}&mode=${mode}` : `https://maps.googleapis.com/maps/api/directions/json?origin=${encodeURIComponent(originStr)}&destination=${encodeURIComponent(destStr)}&mode=${mode}&key=${GOOGLE_PLACES_API_KEY}`;
+  const originStr = `${origin.longitude},${origin.latitude}`;
+  const destStr = `${destination.longitude},${destination.latitude}`;
+  const profile = mode === 'walking' ? 'walking' : mode === 'bicycling' ? 'cycling' : 'driving';
+  const url = `https://api.mapbox.com/directions/v5/mapbox/${profile}/${encodeURIComponent(originStr)};${encodeURIComponent(destStr)}?geometries=geojson&access_token=${MAPBOX_ACCESS_TOKEN}`;
   let res;
   try {
     res = await axios.get(url);
@@ -88,22 +94,26 @@ export const getDirections = async (origin: { latitude: number; longitude: numbe
     throw new Error('directions_request_failed');
   }
 
-  // Google may return an error status inside the JSON payload (e.g., REQUEST_DENIED)
-  if (res.data && res.data.status && res.data.status !== 'OK') {
-    const s = res.data.status;
-    console.warn('directions service returned non-OK status', s, res.data.error_message);
-    throw new Error(s || 'directions_service_error');
-  }
-
-  const route = res.data.routes && res.data.routes[0];
-  if (!route) {
+  if (!res.data.routes || res.data.routes.length === 0) {
     throw new Error('no_route_found');
   }
+
+  const route = res.data.routes[0];
   const leg = route.legs[0];
-  // Decode polyline (simple implementation)
-  const points = route.overview_polyline && route.overview_polyline.points ? decodePolyline(route.overview_polyline.points) : [];
-  const steps = leg.steps.map((s: any) => ({ instruction: s.html_instructions.replace(/<[^>]+>/g, ''), distance: s.distance.text, duration: s.duration.text, start_location: s.start_location, end_location: s.end_location }));
-  return { points, steps, distance: leg.distance.text, duration: leg.duration.text };
+  const points = route.geometry.coordinates.map((coord: [number, number]) => ({ latitude: coord[1], longitude: coord[0] }));
+  const steps = leg.steps.map((s: any) => ({
+    instruction: s.maneuver.instruction,
+    distance: `${Math.round(s.distance)} m`,
+    duration: `${Math.round(s.duration)} s`,
+    start_location: s.maneuver.location,
+    end_location: s.geometry.coordinates[s.geometry.coordinates.length - 1]
+  }));
+  return {
+    points,
+    steps,
+    distance: `${Math.round(route.distance / 1000)} km`,
+    duration: `${Math.round(route.duration / 60)} mins`
+  };
 };
 
 // Polyline decode (Google polyline algorithm)
