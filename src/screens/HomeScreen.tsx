@@ -1,9 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, Text, TouchableOpacity, FlatList, ScrollView } from 'react-native';
+import React, { useState } from 'react';
+import { View, StyleSheet, Text, TouchableOpacity, FlatList } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useLocation } from '../hooks/useLocation';
-import { useUserStore } from '../store/userStore';
-import { getNearbyPlaces } from '../utils/mapHelpers';
+import { getNearbyPlaces, getGlobalPlaces } from '../utils/mapHelpers';
 // require the platform-aware MapView and support both CJS and ESM shapes
 const _mapMod = require('../components/MapView');
 const CustomMapView = (_mapMod && _mapMod.default) ? _mapMod.default : _mapMod;
@@ -16,38 +15,45 @@ import { getDirections } from '../utils/mapHelpers';
 
 const HomeScreen: React.FC = () => {
   const navigation = useNavigation();
-  const { location } = useLocation();
-  const { profile, savedPlaces, addVisitedPlace, addSavedPlace } = useUserStore();
-
+  const { location, region } = useLocation();
   const [markers, setMarkers] = useState<{ latitude: number; longitude: number; title?: string; icon?: string }[]>([]);
+  const [showTransport, setShowTransport] = useState(false);
+  const [flyTo, setFlyTo] = useState<{ latitude: number; longitude: number } | null>(null);
   const [placesList, setPlacesList] = useState<any[]>([]);
   const [distanceFilter, setDistanceFilter] = useState<'near' | 'medium' | 'far'>('near');
+  const [mapCenter, setMapCenter] = useState<{ latitude: number; longitude: number } | null>(null);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  const [selectedPlaceDetails, setSelectedPlaceDetails] = useState<any | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [currentTime, setCurrentTime] = useState(new Date());
+  const [locationStatus, setLocationStatus] = useState<'detecting' | 'found' | 'error'>('detecting');
 
-  // Update time every minute
-  useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(new Date()), 60000);
-    return () => clearInterval(timer);
-  }, []);
+  // Update location status based on location availability
+  React.useEffect(() => {
+    if (location) {
+      setLocationStatus('found');
+    } else {
+      setLocationStatus('error');
+    }
+  }, [location]);
 
-  const getGreeting = () => {
-    const hour = currentTime.getHours();
-    if (hour < 12) return 'Good morning';
-    if (hour < 17) return 'Good afternoon';
-    return 'Good evening';
-  };
+  type RecItem = { icon: string; text: string };
 
   const handleQuickSearch = async (type: string) => {
     setActiveCategory(type);
+    // determine center: prefer map center, then user location
+    const center = mapCenter || (location ? { latitude: location.latitude, longitude: location.longitude } : { latitude: 9.03, longitude: 38.74 });
+    await fetchCategoryNearby(type, center);
+  };
+
+  const fetchCategoryNearby = async (type: string, center: { latitude: number; longitude: number }) => {
     setIsLoading(true);
     try {
-      const center = location ? { latitude: location.latitude, longitude: location.longitude } : { latitude: 9.03, longitude: 38.74 };
+      // radius depends on distanceFilter
       const radiusMap: any = { near: 2000, medium: 10000, far: 50000 };
       const radius = radiusMap[distanceFilter] || 5000;
-
       const places = await getNearbyPlaces(center, type, radius);
+
+      // compute distance from center (or user location if present)
       const origin = location || center;
       const enriched = places.map((p: any) => ({
         ...p,
@@ -58,13 +64,14 @@ const HomeScreen: React.FC = () => {
           ) : undefined,
       }));
 
+      // apply distanceFilter precisely
       const filtered = enriched.filter((p: any) => {
         if (typeof p.distanceMeters !== 'number') return true;
         const km = p.distanceMeters / 1000;
         if (distanceFilter === 'near') return km <= 2;
         if (distanceFilter === 'medium') return km <= 10;
         return km > 10;
-      }).slice(0, 20);
+      }).slice(0, 60);
 
       const newMarkers = filtered.map((place: any, idx: number) => ({
         latitude: place.location.lat,
@@ -76,8 +83,16 @@ const HomeScreen: React.FC = () => {
 
       setMarkers(newMarkers);
       setPlacesList(filtered);
+
+      // Auto-navigate to first result on map
+      if (filtered.length > 0) {
+        setFlyTo({ latitude: filtered[0].location.lat, longitude: filtered[0].location.lng });
+      }
     } catch (error) {
       console.error('Error fetching nearby places:', error);
+      // Show user-friendly error message
+      setPlacesList([]);
+      setMarkers([]);
     } finally {
       setIsLoading(false);
     }
@@ -104,362 +119,226 @@ const HomeScreen: React.FC = () => {
     return icons[type] || '📍';
   };
 
-  const handlePlaceAction = async (place: any, action: 'navigate' | 'save' | 'visit') => {
-    try {
-      if (action === 'navigate') {
-        (navigation as any).navigate('Directions', {
-          destination: { latitude: place.location.lat, longitude: place.location.lng },
-          destinationName: place.name
-        });
-      } else if (action === 'save') {
-        addSavedPlace({
-          id: place.id,
-          name: place.name,
-          location: place.location,
-          address: place.vicinity || place.address,
-          type: activeCategory
-        });
-      } else if (action === 'visit') {
-        addVisitedPlace({
-          id: place.id,
-          name: place.name,
-          location: place.location,
-          address: place.vicinity || place.address,
-          visitedAt: new Date().toISOString()
-        });
-      }
-    } catch (error) {
-      console.error('Action failed:', error);
-    }
+  const navigateWithMode = (mode: string) => {
+    setShowTransport(false);
+    (navigation as any).navigate('Directions', { mode });
   };
 
-  const quickActions = [
-    {
-      title: 'Recent Places',
-      icon: '🕒',
-      action: () => (navigation as any).navigate('Profile'),
-      subtitle: 'View your history'
-    },
-    {
-      title: 'Saved Places',
-      icon: '💾',
-      action: () => (navigation as any).navigate('Profile'),
-      subtitle: `${savedPlaces.length} saved`
-    },
-    {
-      title: 'Voice Search',
-      icon: '🎤',
-      action: () => (navigation as any).navigate('Search'),
-      subtitle: 'Search hands-free'
-    },
-    {
-      title: 'Settings',
-      icon: '⚙️',
-      action: () => (navigation as any).navigate('Profile'),
-      subtitle: 'Preferences'
-    }
-  ];
-
   const categories = [
-    { name: 'Food & Drink', icon: '🍽️', type: 'restaurant', color: '#FF6B6B' },
-    { name: 'Coffee', icon: '☕', type: 'cafe', color: '#4ECDC4' },
-    { name: 'Nightlife', icon: '🍺', type: 'bar', color: '#45B7D1' },
-    { name: 'Entertainment', icon: '🎉', type: 'night_club', color: '#96CEB4' },
-    { name: 'Parks', icon: '🌳', type: 'park', color: '#FFEAA7' },
-    { name: 'Services', icon: '🔧', type: 'car_repair', color: '#DDA0DD' },
-    { name: 'Gas', icon: '⛽', type: 'gas_station', color: '#98D8C8' },
-    { name: 'Banking', icon: '💰', type: 'atm', color: '#F7DC6F' },
-    { name: 'Health', icon: '🏥', type: 'hospital', color: '#BB8FCE' },
-    { name: 'Education', icon: '📚', type: 'library', color: '#85C1E9' },
-    { name: 'Transport', icon: '🚌', type: 'bus_station', color: '#F8C471' },
-    { name: 'Emergency', icon: '🚨', type: 'police', color: '#E74C3C' },
+    { name: 'Restaurants', icon: '🍽️', type: 'restaurant' },
+    { name: 'Cafes', icon: '☕', type: 'cafe' },
+    { name: 'Bars', icon: '🍺', type: 'bar' },
+    { name: 'Clubs', icon: '🎉', type: 'night_club' },
+    { name: 'Parks', icon: '🌳', type: 'park' },
+    { name: 'Garages', icon: '🔧', type: 'car_repair' },
+    { name: 'Gas Stations', icon: '⛽', type: 'gas_station' },
+    { name: 'ATMs', icon: '💰', type: 'atm' },
+    { name: 'Hospitals', icon: '🏥', type: 'hospital' },
+    { name: 'Libraries', icon: '📚', type: 'library' },
+    { name: 'Bus Stations', icon: '🚌', type: 'bus_station' },
+    { name: 'Universities', icon: '🎓', type: 'university' },
+    { name: 'Schools', icon: '🏫', type: 'school' },
+    { name: 'Government', icon: '🏛️', type: 'local_government_office' },
+    { name: 'Train Stations', icon: '🚆', type: 'train_station' },
   ];
 
   return (
     <CupertinoLayout>
-      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-        {/* Header with greeting */}
+      <View style={styles.container}>
         <View style={styles.header}>
-          <View style={styles.greetingSection}>
-            <Text style={styles.greeting}>{getGreeting()}, {profile.name.split(' ')[0]}!</Text>
-            <Text style={styles.subtitle}>
-              {location ? '📍 Location detected' : '📍 Location not available'}
-            </Text>
+          <View style={styles.headerLeft}>
+            <Text style={styles.logo}>🗺️ Navigator</Text>
+            <View style={styles.locationStatus}>
+              <Text style={[
+                styles.locationText,
+                locationStatus === 'found' && styles.locationFound,
+                locationStatus === 'error' && styles.locationError,
+                locationStatus === 'detecting' && styles.locationDetecting
+              ]}>
+                {locationStatus === 'found' ? '📍 Location Active' :
+                 locationStatus === 'error' ? '📍 Location Off' :
+                 '📍 Detecting...'}
+              </Text>
+            </View>
           </View>
-          <TouchableOpacity
-            style={styles.searchButton}
-            onPress={() => (navigation as any).navigate('Search')}
-          >
-            <Text style={styles.searchIcon}>🔍</Text>
-            <Text style={styles.searchText}>Where to?</Text>
-          </TouchableOpacity>
+          <View style={styles.headerRight}>
+            <TouchableOpacity onPress={() => (navigation as any).navigate('Search')} style={styles.headerSearch}>
+              <Text style={styles.headerSearchText}>🔍 Search places...</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => (navigation as any).navigate('Profile')} style={styles.headerIcon}>
+              <Text style={styles.icon}>👤</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => (navigation as any).navigate('Saved')} style={styles.headerIcon}>
+              <Text style={styles.icon}>💾</Text>
+            </TouchableOpacity>
+          </View>
         </View>
-
-        {/* Quick Actions */}
-        <View style={styles.quickActions}>
-          {quickActions.map((action, index) => (
+        <View style={styles.categories}>
+          {categories.map((cat, index) => (
             <TouchableOpacity
               key={index}
-              style={styles.quickActionButton}
-              onPress={action.action}
+              style={styles.categoryButton}
+              onPress={() => handleQuickSearch(cat.type)}
+              accessible
+              accessibilityLabel={`Find nearby ${cat.name}`}
+              accessibilityRole="button"
             >
-              <Text style={styles.quickActionIcon}>{action.icon}</Text>
-              <Text style={styles.quickActionTitle}>{action.title}</Text>
-              <Text style={styles.quickActionSubtitle}>{action.subtitle}</Text>
+              <Text style={styles.categoryIcon}>{cat.icon}</Text>
+              <Text style={styles.categoryText}>{cat.name}</Text>
             </TouchableOpacity>
           ))}
         </View>
-
-        {/* Categories */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Explore Categories</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoriesScroll}>
-            {categories.map((cat, index) => (
-              <TouchableOpacity
-                key={index}
-                style={[styles.categoryCard, { backgroundColor: cat.color }]}
-                onPress={() => handleQuickSearch(cat.type)}
-                disabled={isLoading}
-              >
-                <Text style={styles.categoryIcon}>{cat.icon}</Text>
-                <Text style={styles.categoryName}>{cat.name}</Text>
+        <BlurFallback style={styles.recommendations}>
+          <TouchableOpacity style={styles.ctaButton} onPress={() => setShowTransport(!showTransport)}>
+            <Text style={styles.ctaText}>Explore Nearby</Text>
+          </TouchableOpacity>
+          {showTransport && (
+            <View style={styles.transportOptions}>
+              <TouchableOpacity style={styles.transportButton} onPress={() => navigateWithMode('driving')}>
+                <Text style={styles.transportText}>🚗 Driving</Text>
               </TouchableOpacity>
-            ))}
-          </ScrollView>
+              <TouchableOpacity style={styles.transportButton} onPress={() => navigateWithMode('walking')}>
+                <Text style={styles.transportText}>🚶 Walking</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.transportButton} onPress={() => navigateWithMode('bicycling')}>
+                <Text style={styles.transportText}>🚴 Bicycling</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.transportButton} onPress={() => navigateWithMode('transit')}>
+                <Text style={styles.transportText}>🚍 Transit</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </BlurFallback>
+        <View style={styles.mapPreview}>
+          <CustomMapView markers={markers} flyTo={flyTo} onFlyComplete={(coords: { latitude: number; longitude: number }) => { console.log('Fly complete', coords); setFlyTo(null); }} onMarkerPress={(marker: any) => { setSelectedPlaceDetails(marker); }} onRegionChangeComplete={(r: any) => { if (r && r.latitude && r.longitude) { setMapCenter({ latitude: r.latitude, longitude: r.longitude }); if (activeCategory) { fetchCategoryNearby(activeCategory, { latitude: r.latitude, longitude: r.longitude }); } } }} />
+
+          <TouchableOpacity style={styles.fullMapButton} onPress={() => (navigation as any).navigate('Directions')}>
+            <Text style={styles.fullMapText}>See Full Map</Text>
+          </TouchableOpacity>
         </View>
-
-        {/* Places Results */}
         {placesList.length > 0 && (
-          <View style={styles.section}>
-            <View style={styles.resultsHeader}>
-              <Text style={styles.sectionTitle}>
-                {activeCategory ? `${categories.find(c => c.type === activeCategory)?.name} Nearby` : 'Nearby Places'}
-              </Text>
-              <View style={styles.filterButtons}>
-                {(['near', 'medium', 'far'] as const).map((filter) => (
-                  <TouchableOpacity
-                    key={filter}
-                    style={[styles.filterChip, distanceFilter === filter && styles.activeFilterChip]}
-                    onPress={() => {
-                      setDistanceFilter(filter);
-                      if (activeCategory) handleQuickSearch(activeCategory);
-                    }}
-                  >
-                    <Text style={[styles.filterChipText, distanceFilter === filter && styles.activeFilterChipText]}>
-                      {filter === 'near' ? '0-2km' : filter === 'medium' ? '2-10km' : '>10km'}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-
-            {placesList.map((place, index) => (
-              <NeonCard key={index} style={styles.placeCard}>
-                <View style={styles.placeHeader}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.placeName}>{place.name}</Text>
-                    <Text style={styles.placeAddress}>
-                      {place.vicinity || place.address || 'Address not available'}
-                    </Text>
-                    <View style={styles.placeMeta}>
-                      <Text style={styles.placeRating}>
-                        ⭐ {place.rating || '—'}
-                      </Text>
-                      <Text style={styles.placeDistance}>
-                        📍 {place.distanceMeters ? `${(place.distanceMeters / 1000).toFixed(1)} km` : '—'}
-                      </Text>
-                      <Text style={styles.placeStatus}>
-                        {place.opening_hours?.open_now ? '🟢 Open' : place.opening_hours?.open_now === false ? '🔴 Closed' : '⚪ Hours unknown'}
-                      </Text>
-                    </View>
-                  </View>
-                </View>
-
-                <View style={styles.placeActions}>
-                  <TouchableOpacity
-                    style={styles.actionButton}
-                    onPress={() => handlePlaceAction(place, 'navigate')}
-                  >
-                    <Text style={styles.actionButtonText}>🧭 Navigate</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.actionButton}
-                    onPress={() => handlePlaceAction(place, 'save')}
-                  >
-                    <Text style={styles.actionButtonText}>💾 Save</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.actionButton}
-                    onPress={() => handlePlaceAction(place, 'visit')}
-                  >
-                    <Text style={styles.actionButtonText}>✅ Visited</Text>
-                  </TouchableOpacity>
-                </View>
-              </NeonCard>
-            ))}
-          </View>
-        )}
-
-        {/* Loading State */}
-        {isLoading && (
-          <View style={styles.loadingContainer}>
-            <Text style={styles.loadingText}>Finding places nearby...</Text>
-          </View>
-        )}
-
-        {/* Map Preview */}
-        {markers.length > 0 && (
-          <View style={styles.mapSection}>
-            <Text style={styles.sectionTitle}>Map View</Text>
-            <View style={styles.mapContainer}>
-              <CustomMapView
-                markers={markers}
-                onMarkerPress={(marker: any) => {
-                  const place = placesList.find(p => p.location.lat === marker.latitude && p.location.lng === marker.longitude);
-                  if (place) handlePlaceAction(place, 'navigate');
-                }}
-              />
-              <TouchableOpacity
-                style={styles.fullMapButton}
-                onPress={() => (navigation as any).navigate('Directions')}
-              >
-                <Text style={styles.fullMapButtonText}>View Full Map</Text>
+          <View style={styles.placesList}>
+            <View style={styles.filters}>
+              <TouchableOpacity onPress={() => setDistanceFilter('near')} style={[styles.filterButton, distanceFilter === 'near' && styles.activeFilter]}>
+                <Text style={styles.filterText}>Near (0-2km)</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setDistanceFilter('medium')} style={[styles.filterButton, distanceFilter === 'medium' && styles.activeFilter]}>
+                <Text style={styles.filterText}>Medium (2-10km)</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setDistanceFilter('far')} style={[styles.filterButton, distanceFilter === 'far' && styles.activeFilter]}>
+                <Text style={styles.filterText}>Far ({'>'}10km)</Text>
               </TouchableOpacity>
             </View>
+            <FlatList
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              data={placesList}
+              renderItem={({ item }: { item: any }) => (
+                <TouchableOpacity style={styles.placeCard} onPress={() => (navigation as any).navigate('Directions', { destination: { latitude: item.location.lat, longitude: item.location.lng }, destinationName: item.name })} onLongPress={() => { console.log('Saved', item); }}>
+                  <Text style={styles.placeName}>{item.name}</Text>
+                  <Text style={styles.placeDetails}>⭐ {item.rating || '—'} • {item.distanceMeters ? (item.distanceMeters/1000).toFixed(2)+' km' : '—'} • {item.opening_hours?.open_now ? 'Open' : (item.opening_hours?.open_now === false ? 'Closed' : '—')}</Text>
+                  <View style={{ flexDirection: 'row', marginTop: 8 }}>
+                    <TouchableOpacity style={{ marginRight: 8 }} onPress={() => { (navigation as any).navigate('Directions', { destination: { latitude: item.location.lat, longitude: item.location.lng }, destinationName: item.name }); }}><Text style={{ color: '#00FFFF' }}>Directions</Text></TouchableOpacity>
+                    <TouchableOpacity style={{ marginRight: 8 }} onPress={async () => {
+                      try {
+                        const key = 'saved_places_v1';
+                        const raw = await (require('../utils/storage').safeGetItem)(key);
+                        const cur = raw ? JSON.parse(raw) : [];
+                        const entry = { name: item.name, location: item.location, address: item.vicinity || item.address };
+                        const updated = [entry, ...cur.filter((c: any) => JSON.stringify(c.location) !== JSON.stringify(entry.location))].slice(0, 100);
+                        await (require('../utils/storage').safeSetItem)(key, JSON.stringify(updated));
+                        console.log('Saved', item.name);
+                      } catch (e) { console.warn('save failed', e); }
+                    }}><Text style={{ color: '#FFD700' }}>Save</Text></TouchableOpacity>
+                    <TouchableOpacity onPress={() => { console.log('Share', item); }}><Text style={{ color: '#FFF' }}>Share</Text></TouchableOpacity>
+                  </View>
+                </TouchableOpacity>
+              )}
+              keyExtractor={(item: any, index: number) => index.toString()}
+            />
           </View>
         )}
-
-        {/* Directions Floating Button */}
-        <DirectionsFloating
-          onStart={async (mode?: string) => {
-            if (!location) {
-              console.warn('No current location');
-              return;
-            }
-            const destination = markers[0] ?
-              { latitude: markers[0].latitude, longitude: markers[0].longitude } :
-              { latitude: location.latitude + 0.01, longitude: location.longitude + 0.01 };
-
-            try {
-              const res = await getDirections(
-                { latitude: location.latitude, longitude: location.longitude },
-                destination,
-                (mode as any) || 'driving'
-              );
-              (navigation as any).navigate('Directions', {
-                routePreview: res,
-                origin: { latitude: location.latitude, longitude: location.longitude },
-                destination
-              });
-            } catch (e) {
-              console.error('Directions failed', e);
-            }
-          }}
-        />
-      </ScrollView>
+        {selectedPlaceDetails && (
+          <View style={{ padding: 12, backgroundColor: 'rgba(0,0,0,0.8)' }}>
+            <Text style={{ color: '#fff', fontWeight: '700' }}>{selectedPlaceDetails.title}</Text>
+            <Text style={{ color: '#ccc', marginTop: 6 }}>{selectedPlaceDetails.latitude}, {selectedPlaceDetails.longitude}</Text>
+            <View style={{ flexDirection: 'row', marginTop: 8 }}>
+              <TouchableOpacity style={{ marginRight: 10 }} onPress={async () => {
+                if (!location) return; const dest = { latitude: selectedPlaceDetails.latitude, longitude: selectedPlaceDetails.longitude }; try { const res = await getDirections({ latitude: location.latitude, longitude: location.longitude }, dest, 'driving'); (navigation as any).navigate('Directions', { routePreview: res, origin: { latitude: location.latitude, longitude: location.longitude }, destination: dest }); } catch (e) { console.warn('directions failed', e); }
+              }}><Text style={{ color: '#00FFFF' }}>Directions</Text></TouchableOpacity>
+              <TouchableOpacity onPress={async () => {
+                try {
+                  const key = 'saved_places_v1';
+                  const raw = await (require('../utils/storage').safeGetItem)(key);
+                  const cur = raw ? JSON.parse(raw) : [];
+                  const entry = { name: selectedPlaceDetails.title, location: { latitude: selectedPlaceDetails.latitude, longitude: selectedPlaceDetails.longitude } };
+                  const updated = [entry, ...cur.filter((c: any) => JSON.stringify(c.location) !== JSON.stringify(entry.location))].slice(0, 100);
+                  await (require('../utils/storage').safeSetItem)(key, JSON.stringify(updated));
+                  console.log('Saved place', selectedPlaceDetails.title);
+                } catch (e) { console.warn('save failed', e); }
+              }}><Text style={{ color: '#FFD700' }}>Save</Text></TouchableOpacity>
+            </View>
+          </View>
+        )}
+        <DirectionsFloating onStart={async (mode?: string) => {
+          if (!location) { console.warn('No current location'); return; }
+          // pick a sample destination if none marked - for demo use a short offset
+          const destination = markers[0] ? { latitude: markers[0].latitude, longitude: markers[0].longitude } : { latitude: location.latitude + 0.01, longitude: location.longitude + 0.01 };
+          try {
+            const res = await getDirections({ latitude: location.latitude, longitude: location.longitude }, destination, (mode as any) || 'driving');
+            console.log('Directions result', res);
+            // navigate to Directions screen with preview payload so it can render route + steps
+            (navigation as any).navigate('Directions', { routePreview: res, origin: { latitude: location.latitude, longitude: location.longitude }, destination });
+          } catch (e) {
+            console.error('Directions failed', e);
+          }
+        }} />
+        <View style={styles.footer}>
+          <Text style={styles.footerText}>About | Contact | Terms | Privacy</Text>
+        </View>
+      </View>
     </CupertinoLayout>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
-  header: { padding: 20, paddingBottom: 15 },
-  greetingSection: { marginBottom: 15 },
-  greeting: { color: '#FFF', fontSize: 24, fontWeight: 'bold', marginBottom: 5 },
-  subtitle: { color: colors.muted, fontSize: 14 },
-  searchButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    padding: 15,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.outline
-  },
-  searchIcon: { fontSize: 18, marginRight: 10 },
-  searchText: { color: colors.muted, fontSize: 16 },
-
-  quickActions: { flexDirection: 'row', paddingHorizontal: 20, marginBottom: 20 },
-  quickActionButton: {
-    flex: 1,
-    backgroundColor: colors.surfaceElevated,
-    padding: 15,
-    borderRadius: 12,
-    alignItems: 'center',
-    marginHorizontal: 5,
-    borderWidth: 1,
-    borderColor: colors.outline
-  },
-  quickActionIcon: { fontSize: 24, marginBottom: 8 },
-  quickActionTitle: { color: '#FFF', fontSize: 14, fontWeight: '600', marginBottom: 4 },
-  quickActionSubtitle: { color: colors.muted, fontSize: 12 },
-
-  section: { marginBottom: 25, paddingHorizontal: 20 },
-  sectionTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold', marginBottom: 15 },
-  categoriesScroll: { marginHorizontal: -20, paddingHorizontal: 20 },
-  categoryCard: {
-    width: 80,
-    height: 80,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 5
-  },
-  categoryIcon: { fontSize: 24, marginBottom: 5 },
-  categoryName: { color: '#FFF', fontSize: 11, fontWeight: '600', textAlign: 'center' },
-
-  resultsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
-  filterButtons: { flexDirection: 'row' },
-  filterChip: {
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    marginLeft: 8
-  },
-  activeFilterChip: { backgroundColor: colors.neonPrimary },
-  filterChipText: { color: colors.muted, fontSize: 12 },
-  activeFilterChipText: { color: '#000', fontWeight: '600' },
-
-  placeCard: { padding: 16, marginBottom: 12 },
-  placeHeader: { flexDirection: 'row', marginBottom: 12 },
-  placeName: { color: '#FFF', fontSize: 16, fontWeight: 'bold', marginBottom: 4 },
-  placeAddress: { color: colors.muted, fontSize: 14, marginBottom: 8 },
-  placeMeta: { flexDirection: 'row', flexWrap: 'wrap' },
-  placeRating: { color: '#FFD700', fontSize: 12, marginRight: 12 },
-  placeDistance: { color: colors.neonPrimary, fontSize: 12, marginRight: 12 },
-  placeStatus: { color: colors.muted, fontSize: 12 },
-  placeActions: { flexDirection: 'row', justifyContent: 'space-between' },
-  actionButton: {
-    flex: 1,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    padding: 10,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginHorizontal: 2
-  },
-  actionButtonText: { color: '#FFF', fontSize: 12, fontWeight: '600' },
-
-  loadingContainer: { padding: 40, alignItems: 'center' },
-  loadingText: { color: colors.muted, fontSize: 16 },
-
-  mapSection: { paddingHorizontal: 20, marginBottom: 20 },
-  mapContainer: { height: 200, borderRadius: 12, overflow: 'hidden', position: 'relative' },
-  fullMapButton: {
-    position: 'absolute',
-    bottom: 12,
-    right: 12,
-    backgroundColor: colors.neonPrimary,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20
-  },
-  fullMapButtonText: { color: '#000', fontSize: 12, fontWeight: 'bold' },
+  container: { flex: 1, backgroundColor: '#000' },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, backgroundColor: 'rgba(0,0,0,0.9)', borderBottomWidth: 1, borderBottomColor: colors.neonPrimary },
+  headerLeft: { flex: 1 },
+  logo: { color: colors.neonPrimary, fontSize: 20, fontWeight: 'bold', marginBottom: 4 },
+  locationStatus: { flexDirection: 'row', alignItems: 'center' },
+  locationText: { color: '#888', fontSize: 12 },
+  locationFound: { color: '#4CAF50' },
+  locationError: { color: '#F44336' },
+  locationDetecting: { color: '#FF9800' },
+  headerRight: { flexDirection: 'row', alignItems: 'center' },
+  headerSearch: { backgroundColor: 'rgba(255,255,255,0.1)', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 20, marginRight: 10 },
+  headerSearchText: { color: '#FFF', fontSize: 14 },
+  headerIcon: { padding: 8, marginLeft: 5 },
+  icon: { fontSize: 20, color: '#FFF' },
+  categories: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', padding: 10 },
+  categoryButton: { backgroundColor: 'rgba(0,0,0,0.8)', padding: 6, borderRadius: 10, margin: 2, alignItems: 'center', borderWidth: 1, borderColor: colors.neonPrimary, minWidth: 60 },
+  categoryIcon: { fontSize: 18 },
+  categoryText: { color: '#FFF', fontSize: 9, marginTop: 2 },
+  recommendations: { margin: 10, padding: 15, borderRadius: 15 },
+  ctaButton: { backgroundColor: '#00FFFF', padding: 10, borderRadius: 20, marginTop: 10, alignItems: 'center' },
+  ctaText: { color: '#000', fontSize: 16, fontWeight: 'bold' },
+  transportOptions: { flexDirection: 'row', justifyContent: 'space-around', marginTop: 10 },
+  transportButton: { backgroundColor: 'rgba(0,255,255,0.2)', padding: 10, borderRadius: 10, alignItems: 'center' },
+  transportText: { color: '#00FFFF', fontSize: 14 },
+  mapPreview: { flex: 1, margin: 10, borderRadius: 15, overflow: 'hidden' },
+  fullMapButton: { position: 'absolute', bottom: 10, right: 10, backgroundColor: 'rgba(0,0,0,0.8)', padding: 8, borderRadius: 20, borderWidth: 1, borderColor: '#00FFFF' },
+  fullMapText: { color: '#00FFFF', fontSize: 12 },
+  placesList: { padding: 10, backgroundColor: 'rgba(0,0,0,0.9)' },
+  filters: { flexDirection: 'row', justifyContent: 'space-around', marginBottom: 10 },
+  filterButton: { padding: 8, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.1)' },
+  activeFilter: { backgroundColor: '#00FFFF' },
+  filterText: { color: '#FFF', fontSize: 12 },
+  placeCard: { backgroundColor: 'rgba(255,255,255,0.1)', padding: 10, borderRadius: 10, marginRight: 10, minWidth: 150 },
+  placeName: { color: '#FFF', fontSize: 14, fontWeight: 'bold' },
+  placeDetails: { color: '#CCC', fontSize: 12 },
+  footer: { padding: 10, alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.9)' },
+  footerText: { color: '#888', fontSize: 12 },
 });
 
 export default HomeScreen;
