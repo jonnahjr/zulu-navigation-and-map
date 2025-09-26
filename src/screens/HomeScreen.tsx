@@ -147,19 +147,10 @@ const HomeScreen: React.FC = () => {
       <View style={styles.container}>
         <View style={styles.header}>
           <View style={styles.headerLeft}>
-            <Text style={styles.logo}>🗺️ Navigator</Text>
-            <View style={styles.locationStatus}>
-              <Text style={[
-                styles.locationText,
-                locationStatus === 'found' && styles.locationFound,
-                locationStatus === 'error' && styles.locationError,
-                locationStatus === 'detecting' && styles.locationDetecting
-              ]}>
-                {locationStatus === 'found' ? '📍 Location Active' :
-                 locationStatus === 'error' ? '📍 Location Off' :
-                 '📍 Detecting...'}
-              </Text>
-            </View>
+            <Text style={styles.greeting}>Good morning, yonas!</Text>
+            <Text style={styles.locationStatus}>
+              📍 Location detected
+            </Text>
           </View>
           <View style={styles.headerRight}>
             <TouchableOpacity onPress={() => (navigation as any).navigate('Search')} style={styles.headerSearch}>
@@ -305,12 +296,8 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, backgroundColor: 'rgba(0,0,0,0.9)', borderBottomWidth: 1, borderBottomColor: colors.neonPrimary },
   headerLeft: { flex: 1 },
-  logo: { color: colors.neonPrimary, fontSize: 20, fontWeight: 'bold', marginBottom: 4 },
-  locationStatus: { flexDirection: 'row', alignItems: 'center' },
-  locationText: { color: '#888', fontSize: 12 },
-  locationFound: { color: '#4CAF50' },
-  locationError: { color: '#F44336' },
-  locationDetecting: { color: '#FF9800' },
+  greeting: { color: '#FFF', fontSize: 20, fontWeight: 'bold', marginBottom: 4 },
+  locationStatus: { color: '#4CAF50', fontSize: 14 },
   headerRight: { flexDirection: 'row', alignItems: 'center' },
   headerSearch: { backgroundColor: 'rgba(255,255,255,0.1)', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 20, marginRight: 10 },
   headerSearchText: { color: '#FFF', fontSize: 14 },
