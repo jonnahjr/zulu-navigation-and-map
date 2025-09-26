@@ -1,11 +1,18 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text } from 'react-native';
+import { useWebSocket } from './src/hooks/useWebSocket';
+
+// Create a context for real-time data
+export const RealtimeContext = React.createContext<any>(null);
 
 // Bootstrap app lazily to avoid importing unimodules at module-eval time which
 // can trigger native initialization (and on some Android versions cause a
 // SecurityException before AppRegistry.registerComponent is called).
 const App: React.FC = () => {
   const [ReadyRoot, setReadyRoot] = useState<React.ComponentType | null>(null);
+
+  // Initialize WebSocket connection
+  const realtimeData = useWebSocket('user_' + Date.now(), 'Navigator User');
 
   useEffect(() => {
     let mounted = true;
@@ -20,14 +27,16 @@ const App: React.FC = () => {
       const AppNavigatorModule = require('./src/navigation/AppNavigator');
 
       const Root: React.FC = () => (
-        // @ts-ignore - SafeAreaProvider typed as any when required dynamically
-        <SafeAreaProvider>
-          {/* @ts-ignore */}
-          <StatusBar style="auto" />
-          {/* AppNavigator is default export */}
-          {/* @ts-ignore */}
-          <AppNavigatorModule.default />
-        </SafeAreaProvider>
+        <RealtimeContext.Provider value={realtimeData}>
+          {/* @ts-ignore - SafeAreaProvider typed as any when required dynamically */}
+          <SafeAreaProvider>
+            {/* @ts-ignore */}
+            <StatusBar style="auto" />
+            {/* AppNavigator is default export */}
+            {/* @ts-ignore */}
+            <AppNavigatorModule.default />
+          </SafeAreaProvider>
+        </RealtimeContext.Provider>
       );
 
       if (mounted) setReadyRoot(() => Root);
@@ -36,12 +45,15 @@ const App: React.FC = () => {
       console.warn('Failed to require app modules dynamically', e);
     }
     return () => { mounted = false; };
-  }, []);
+  }, [realtimeData]);
 
   if (!ReadyRoot) {
     return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-        <Text>Loading App...</Text>
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#000' }}>
+        <Text style={{ color: '#FFF', fontSize: 18 }}>Loading Zulu Navigator...</Text>
+        <Text style={{ color: '#00FFFF', fontSize: 14, marginTop: 10 }}>
+          {realtimeData.isConnected ? '🟢 Connected to real-time server' : '🟡 Connecting...'}
+        </Text>
       </View>
     );
   }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useContext } from 'react';
 import { View, StyleSheet, TouchableOpacity, Text, TextInput, Platform } from 'react-native';
 // ScrollView and ActivityIndicator are provided by react-native-web in web builds; import dynamically
 import RNWeb from 'react-native';
@@ -7,6 +7,7 @@ const ActivityIndicator = (RNWeb as any).ActivityIndicator || (() => <Text style
 import CupertinoLayout from '../components/cupertino/CupertinoLayout';
 import { useLocation } from '../hooks/useLocation';
 import { useNavigation, useRoute } from '@react-navigation/native';
+import { RealtimeContext } from '../../App';
 
 type NominatimResult = {
   place_id: number | string;
@@ -136,6 +137,9 @@ const SearchScreen: React.FC = () => {
   const initialQuery = (route.params as any)?.initialQuery || '';
   const debounceRef = useRef<any>(null);
 
+  // Real-time WebSocket integration
+  const realtime = useContext(RealtimeContext);
+
   useEffect(() => {
     if (initialQuery && initialQuery.length > 0) {
       setQuery(initialQuery);
@@ -145,8 +149,20 @@ const SearchScreen: React.FC = () => {
   useEffect(() => {
     if (location && location.latitude && location.longitude) {
       setCenter({ latitude: location.latitude, longitude: location.longitude });
+
+      // Send real-time location update
+      if (realtime?.sendLocationUpdate) {
+        realtime.sendLocationUpdate(location.latitude, location.longitude);
+      }
     }
-  }, [location]);
+  }, [location, realtime]);
+
+  // Send search queries in real-time for collaborative features
+  useEffect(() => {
+    if (query.length > 2 && realtime?.sendSearchQuery) {
+      realtime.sendSearchQuery(query);
+    }
+  }, [query, realtime]);
 
   const computeViewbox = (c: { latitude: number; longitude: number }, delta = 0.2) => {
     const minLat = c.latitude - delta;
@@ -218,6 +234,30 @@ const SearchScreen: React.FC = () => {
               autoCapitalize="none"
             />
             {loading && <ActivityIndicator style={{ marginLeft: 8 }} color="#00FFFF" />}
+          </View>
+
+          {/* Real-time Status Bar */}
+          <View style={styles.statusBar}>
+            <View style={styles.statusItem}>
+              <Text style={[styles.statusDot, { backgroundColor: realtime?.isConnected ? '#00FF00' : '#FF0000' }]}>●</Text>
+              <Text style={styles.statusText}>
+                {realtime?.isConnected ? '🟢 Live' : '🔴 Offline'}
+              </Text>
+            </View>
+            <View style={styles.statusItem}>
+              <Text style={styles.statusText}>👥 {realtime?.onlineUsers?.length || 0} online</Text>
+            </View>
+            <TouchableOpacity
+              style={styles.emergencyButton}
+              onPress={() => {
+                if (location && realtime?.sendEmergency) {
+                  realtime.sendEmergency(location, 'navigation_help');
+                  alert('Emergency alert sent! Help is on the way.');
+                }
+              }}
+            >
+              <Text style={styles.emergencyText}>🚨 SOS</Text>
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -294,6 +334,48 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.9)',
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.1)'
+  },
+
+  // Real-time Status Bar
+  statusBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)'
+  },
+  statusItem: {
+    flexDirection: 'row',
+    alignItems: 'center'
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 6
+  },
+  statusText: {
+    color: '#FFF',
+    fontSize: 12,
+    fontWeight: '500'
+  },
+  emergencyButton: {
+    backgroundColor: '#FF4444',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 15,
+    borderWidth: 1,
+    borderColor: '#FF6666'
+  },
+  emergencyText: {
+    color: '#FFF',
+    fontSize: 12,
+    fontWeight: 'bold'
   },
 
   // Top Section: Search Bar

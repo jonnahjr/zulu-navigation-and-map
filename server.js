@@ -1,13 +1,28 @@
 const express = require('express');
 const fetch = require('node-fetch');
 const cors = require('cors');
+const http = require('http');
+const socketIo = require('socket.io');
 require('dotenv').config();
 
 const app = express();
+const server = http.createServer(app);
+const io = socketIo(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"]
+  }
+});
+
 const PORT = process.env.PROXY_PORT || 3001;
 const MAPBOX_TOKEN = process.env.MAPBOX_ACCESS_TOKEN || '';
 
 app.use(cors());
+app.use(express.json());
+
+// Store active users and their locations
+const activeUsers = new Map();
+const userLocations = new Map();
 
 // Simple polyline encoder (Google algorithm)
 function encodePolyline(points) {
@@ -187,4 +202,146 @@ app.get('/api/places/textsearch', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => console.log(`Proxy server listening on port ${PORT}`));
+// WebSocket connection handling
+io.on('connection', (socket) => {
+  console.log('User connected:', socket.id);
+
+  // User joins with their ID
+  socket.on('join', (userData) => {
+    const { userId, userName } = userData;
+    activeUsers.set(socket.id, { userId, userName, socketId: socket.id });
+    console.log(`User ${userName} (${userId}) joined`);
+
+    // Send current online users count
+    io.emit('userCount', activeUsers.size);
+  });
+
+  // Real-time location sharing
+  socket.on('locationUpdate', (locationData) => {
+    const { latitude, longitude, userId, userName } = locationData;
+    userLocations.set(userId, {
+      latitude,
+      longitude,
+      userId,
+      userName,
+      timestamp: Date.now(),
+      socketId: socket.id
+    });
+
+    // Broadcast location to other users (for live tracking)
+    socket.broadcast.emit('userLocationUpdate', {
+      userId,
+      userName,
+      latitude,
+      longitude,
+      timestamp: Date.now()
+    });
+  });
+
+  // Real-time search sharing (for collaborative features)
+  socket.on('searchQuery', (searchData) => {
+    const { query, userId, userName } = searchData;
+    // Could implement collaborative search suggestions here
+    console.log(`User ${userName} searching: ${query}`);
+  });
+
+  // Route sharing for social features
+  socket.on('shareRoute', (routeData) => {
+    const { route, userId, userName } = routeData;
+    socket.broadcast.emit('routeShared', {
+      route,
+      userId,
+      userName,
+      timestamp: Date.now()
+    });
+  });
+
+  // Emergency/SOS feature
+  socket.on('emergency', (emergencyData) => {
+    const { location, userId, userName, type } = emergencyData;
+    console.log(`🚨 EMERGENCY: ${userName} needs help at ${location.latitude}, ${location.longitude}`);
+
+    // Broadcast emergency to all users
+    io.emit('emergencyAlert', {
+      location,
+      userId,
+      userName,
+      type,
+      timestamp: Date.now()
+    });
+  });
+
+  // Live traffic updates simulation
+  socket.on('requestTraffic', (bounds) => {
+    // Simulate live traffic data
+    const trafficData = generateTrafficData(bounds);
+    socket.emit('trafficUpdate', trafficData);
+  });
+
+  // Handle disconnection
+  socket.on('disconnect', () => {
+    const user = activeUsers.get(socket.id);
+    if (user) {
+      activeUsers.delete(socket.id);
+      userLocations.delete(user.userId);
+      console.log(`User ${user.userName} disconnected`);
+
+      // Notify others
+      io.emit('userCount', activeUsers.size);
+      socket.broadcast.emit('userDisconnected', user.userId);
+    }
+  });
+});
+
+// Generate simulated traffic data
+function generateTrafficData(bounds) {
+  const trafficIncidents = [];
+  const numIncidents = Math.floor(Math.random() * 5) + 1;
+
+  for (let i = 0; i < numIncidents; i++) {
+    trafficIncidents.push({
+      id: `traffic_${Date.now()}_${i}`,
+      type: ['accident', 'construction', 'congestion'][Math.floor(Math.random() * 3)],
+      severity: Math.floor(Math.random() * 3) + 1, // 1-3
+      location: {
+        latitude: bounds.lat + (Math.random() - 0.5) * 0.1,
+        longitude: bounds.lng + (Math.random() - 0.5) * 0.1
+      },
+      description: 'Live traffic update',
+      timestamp: Date.now()
+    });
+  }
+
+  return trafficIncidents;
+}
+
+// Real-time API endpoints
+app.get('/api/realtime/users', (req, res) => {
+  const users = Array.from(activeUsers.values()).map(user => ({
+    userId: user.userId,
+    userName: user.userName,
+    online: true
+  }));
+  res.json({ users, count: users.length });
+});
+
+app.get('/api/realtime/locations', (req, res) => {
+  const locations = Array.from(userLocations.values());
+  res.json({ locations });
+});
+
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    activeUsers: activeUsers.size,
+    server: 'zulu-navigation-realtime-backend'
+  });
+});
+
+server.listen(PORT, () => {
+  console.log(`🚀 Real-time navigation server listening on port ${PORT}`);
+  console.log(`📍 WebSocket enabled for live features`);
+  console.log(`🌐 Health check: http://localhost:${PORT}/api/health`);
+});
