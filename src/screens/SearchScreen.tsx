@@ -1,306 +1,263 @@
-import React, { useState } from 'react';
-import { View, StyleSheet, TouchableOpacity, Text } from 'react-native';
-import SearchBar from '../components/SearchBar';
-import SearchFilters from '../components/search/SearchFilters';
-import ResultsList from '../components/search/ResultsList';
-import TrendingList from '../components/search/TrendingList';
-import useVoiceSearch from '../hooks/useVoiceSearch';
-import { fetchAutocomplete } from '../utils/places';
-import NeonCard from '../components/design/NeonCard';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, StyleSheet, TouchableOpacity, Text, TextInput, Platform } from 'react-native';
+// ScrollView and ActivityIndicator are provided by react-native-web in web builds; import dynamically
+import RNWeb from 'react-native';
+const ScrollView = (RNWeb as any).ScrollView || ((props: any) => <div {...props} />);
+const ActivityIndicator = (RNWeb as any).ActivityIndicator || (() => <Text style={{ color: '#00FFFF' }}>⏳</Text>);
 import CupertinoLayout from '../components/cupertino/CupertinoLayout';
-import BlurFallback from '../components/design/BlurFallback';
 import { useLocation } from '../hooks/useLocation';
-// Support both CommonJS and ESM exports from the platform MapView file
-const _mapMod = require('../components/MapView');
-const CustomMapView = (_mapMod && _mapMod.default) ? _mapMod.default : _mapMod;
-import { getPlaceDetails } from '../utils/places';
-import { getGlobalPlaces, getDirections } from '../utils/mapHelpers';
-import { getPlaceDetails as getPlaceDetailsFromMaps, distanceMeters } from '../utils/mapHelpers';
 import { useNavigation, useRoute } from '@react-navigation/native';
 
+type NominatimResult = {
+  place_id: number | string;
+  display_name: string;
+  lat: string;
+  lon: string;
+  class?: string;
+  type?: string;
+  icon?: string;
+  address?: any;
+};
+
+const DEFAULT_CENTER = { latitude: 9.03, longitude: 38.74 };
+
+// Helper: map nominatim class/type to emoji icon and friendly category
+const mapClassTypeToCategory = (cls?: string, type?: string) => {
+  const c = (cls || '').toLowerCase();
+  const t = (type || '').toLowerCase();
+  if (c === 'amenity') {
+    if (t.includes('restaurant') || t.includes('cafe') || t.includes('bar')) return { icon: '🍽️', label: 'Food & Drink' };
+    if (t.includes('hospital') || t.includes('clinic')) return { icon: '🏥', label: 'Health' };
+    if (t.includes('fuel')) return { icon: '⛽', label: 'Gas' };
+    if (t.includes('school') || t.includes('university')) return { icon: '📚', label: 'Education' };
+    if (t.includes('bank') || t.includes('atm')) return { icon: '🏦', label: 'Finance' };
+  }
+  if (c === 'boundary' || c === 'place') return { icon: '📍', label: 'Place' };
+  if (c === 'tourism') return { icon: '🗺️', label: 'Tourism' };
+  if (c === 'transport') return { icon: '🚌', label: 'Transit' };
+  return { icon: '📌', label: (t || c || 'Unknown').replace(/_/g, ' ') };
+};
+
+const iframeMap = (center: { latitude: number; longitude: number }) => {
+  const lat = center.latitude;
+  const lng = center.longitude;
+  const src = `https://www.openstreetmap.org/export/embed.html?bbox=${lng - 0.02}%2C${lat - 0.02}%2C${lng + 0.02}%2C${lat + 0.02}&layer=mapnik&marker=${lat}%2C${lng}`;
+  return <iframe src={src} style={{ width: '100%', height: '100%', border: 'none' }} title="OSM Map" />;
+};
+
+const WebLeafletMap: React.FC<{ center: { latitude: number; longitude: number }; marker?: { latitude: number; longitude: number } | null }> = ({ center, marker }) => {
+  const [leafletLoaded, setLeafletLoaded] = useState(false);
+  const [components, setComponents] = useState<any>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        // dynamic import so web-only packages don't break native builds
+        const RL = await import('react-leaflet');
+        const L = await import('leaflet');
+        if (!mounted) return;
+        // ensure marker icon images and CSS work when bundlers don't auto-include them
+        try {
+          // Inject Leaflet CSS from CDN if it's not already present
+          const cssId = 'leaflet-css';
+          if (typeof document !== 'undefined' && !document.getElementById(cssId)) {
+            const link = document.createElement('link');
+            link.id = cssId;
+            link.rel = 'stylesheet';
+            link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+            link.crossOrigin = '';
+            document.head.appendChild(link);
+          }
+          // Fix default marker icons to use CDN images (avoids missing image asset issues)
+          // @ts-ignore
+          delete (L.Icon.Default.prototype as any)._getIconUrl;
+          L.Icon.Default.mergeOptions({
+            iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+            iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+            shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+          });
+        } catch (e) {
+          console.warn('leaflet resource setup failed', e);
+        }
+        setComponents({ ...RL, L });
+        setLeafletLoaded(true);
+      } catch (e) {
+        // if import fails (not installed), we'll fallback to iframe
+        setLeafletLoaded(false);
+        setComponents(null);
+      }
+    })();
+    return () => { mounted = false; };
+  }, []);
+
+  if (!components || !leafletLoaded) {
+    return <View style={{ flex: 1 }}>{iframeMap(center)}</View>;
+  }
+
+  const { MapContainer, TileLayer, Marker, Popup } = components as any;
+  return (
+    <MapContainer center={[center.latitude, center.longitude]} zoom={13} style={{ height: '100%', width: '100%' }}>
+      <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+      {marker && (
+        <Marker position={[marker.latitude, marker.longitude]}>
+          <Popup>{marker.latitude.toFixed(5)}, {marker.longitude.toFixed(5)}</Popup>
+        </Marker>
+      )}
+    </MapContainer>
+  );
+};
+
+const highlightMatch = (text: string, q: string): React.ReactNode => {
+  if (!q) return <Text style={{ color: '#FFF' }}>{text}</Text>;
+  const idx = text.toLowerCase().indexOf(q.toLowerCase());
+  if (idx === -1) return <Text style={{ color: '#FFF' }}>{text}</Text>;
+  const before = text.slice(0, idx);
+  const match = text.slice(idx, idx + q.length);
+  const after = text.slice(idx + q.length);
+  return (
+    <Text>
+      <Text style={{ color: '#CCC' }}>{before}</Text>
+      <Text style={{ backgroundColor: '#FFFB00', color: '#000', fontWeight: '700' }}>{match}</Text>
+      <Text style={{ color: '#CCC' }}>{after}</Text>
+    </Text>
+  );
+};
+
 const SearchScreen: React.FC = () => {
-  const [selectedPlace, setSelectedPlace] = useState<{ latitude: number; longitude: number } | null>(null);
-  const [results, setResults] = useState<any[]>([]);
-  const [popularPlaces, setPopularPlaces] = useState<any[]>([]);
-  const [filter, setFilter] = useState<string>('All');
-  const [isLoading, setIsLoading] = useState(false);
-  const voice = useVoiceSearch();
+  const [query, setQuery] = useState('');
+  const [suggestions, setSuggestions] = useState<NominatimResult[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [selected, setSelected] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [center, setCenter] = useState<{ latitude: number; longitude: number }>(DEFAULT_CENTER);
+  const { location } = useLocation();
   const navigation = useNavigation();
   const route = useRoute();
   const initialQuery = (route.params as any)?.initialQuery || '';
-  const [query, setQuery] = useState(initialQuery);
-  const { location } = useLocation();
+  const debounceRef = useRef<any>(null);
 
-  // Addis Ababa center coordinates
-  const addisAbabaCenter = { latitude: 9.03, longitude: 38.74 };
-  const addisAbabaRegion = {
-    latitude: 9.03,
-    longitude: 38.74,
-    latitudeDelta: 0.1,
-    longitudeDelta: 0.1,
-  };
-
-  // Load popular places on mount
-  React.useEffect(() => {
-    loadPopularPlaces();
-  }, []);
-
-  const loadPopularPlaces = async () => {
-    try {
-      // Load some popular places in Addis Ababa
-      const popularQueries = [
-        'Shiromeda Market',
-        'National Museum of Ethiopia',
-        'Holy Trinity Cathedral',
-        'Red Terror Martyrs Memorial',
-        'Entoto Hill'
-      ];
-
-      const popularResults = [];
-      for (const query of popularQueries.slice(0, 3)) {
-        try {
-          const places = await getGlobalPlaces(query);
-          if (places && places.length > 0) {
-            popularResults.push({
-              ...places[0],
-              isPopular: true,
-              category: 'Popular'
-            });
-          }
-        } catch (e) {
-          console.warn(`Failed to load popular place: ${query}`, e);
-        }
-      }
-      setPopularPlaces(popularResults);
-    } catch (error) {
-      console.warn('Failed to load popular places', error);
+  useEffect(() => {
+    if (initialQuery && initialQuery.length > 0) {
+      setQuery(initialQuery);
     }
-  };
+  }, [initialQuery]);
 
-  const handleSubmit = async (q: string) => {
-    if (!q || q.length < 1) return;
-    try {
-      const places = await getGlobalPlaces(q);
-      if (!places || places.length === 0) return;
-      const mapped = places.map((p: any) => ({ place_id: p.id, description: `${p.name} — ${p.vicinity || ''}`, location: p.location }));
-      setResults(mapped);
-      // focus first result on map and preview route
-      const first = places[0];
-      if (first && first.geometry && first.geometry.location) {
-        const coords = { latitude: first.geometry.location.lat || first.location?.lat || first.location?.latitude, longitude: first.geometry.location.lng || first.location?.lng || first.location?.longitude };
-        setSelectedPlace(coords);
-        // if we have current location, compute route preview and navigate
-        if (location) {
-          try {
-            const preview = await getDirections({ latitude: location.latitude, longitude: location.longitude }, coords, 'driving');
-            (navigation as any).navigate('Directions', { routePreview: preview, origin: { latitude: location.latitude, longitude: location.longitude }, destination: coords });
-          } catch (e) {
-            console.warn('preview route failed', e);
-          }
-        }
-      }
-    } catch (e) {
-      console.warn('global place search failed', e);
+  useEffect(() => {
+    if (location && location.latitude && location.longitude) {
+      setCenter({ latitude: location.latitude, longitude: location.longitude });
     }
+  }, [location]);
+
+  const computeViewbox = (c: { latitude: number; longitude: number }, delta = 0.2) => {
+    const minLat = c.latitude - delta;
+    const maxLat = c.latitude + delta;
+    const minLon = c.longitude - delta;
+    const maxLon = c.longitude + delta;
+    // viewbox expects: left, top, right, bottom (lon left, lat top, lon right, lat bottom)
+    return `${minLon},${maxLat},${maxLon},${minLat}`;
   };
 
-  const handlePlaceSelect = async (placeId: string, description: string) => {
-    const details = await getPlaceDetails(placeId);
-    if (details && details.location) {
-      setSelectedPlace(details.location);
-      // navigate to Directions screen, passing destination coords
-      // @ts-ignore - navigation typing light here
-      navigation.navigate('Directions', { destination: details.location, destinationName: details.name });
-    }
-  };
-
-  const handleQuery = async (q: string) => {
-    setQuery(q);
-
-    // Show instant suggestions for any input length
+  const fetchNominatim = async (q: string) => {
     if (!q || q.length < 1) {
-      setResults([]);
-      setIsLoading(false);
+      setSuggestions([]);
       return;
     }
-
-    // For very short queries, show instant suggestions without loading state
-    if (q.length < 2) {
-      setResults([]);
-      setIsLoading(false);
-      return;
-    }
-
-    setIsLoading(true);
+    setLoading(true);
     try {
-      const res = await fetchAutocomplete(q, undefined);
-      setResults(res as any[]);
+      const biasCenter = location && location.latitude ? { latitude: location.latitude, longitude: location.longitude } : DEFAULT_CENTER;
+      const viewbox = computeViewbox(biasCenter, 0.5);
+      const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&addressdetails=1&limit=10&viewbox=${viewbox}&bounded=1`;
+      const resp = await fetch(url, { headers: { 'Accept': 'application/json', 'User-Agent': 'zulu-navigation-app/1.0' } });
+      const data = await resp.json();
+      setSuggestions(data as NominatimResult[]);
     } catch (e) {
-      console.warn('autocomplete failed', e);
-      setResults([]);
+      console.warn('Nominatim fetch failed', e);
+      setSuggestions([]);
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   };
 
-  const handleTrendingPick = (t: string) => {
-    setQuery(t);
-    handleQuery(t);
+  const onChangeText = (text: string) => {
+    setQuery(text);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => fetchNominatim(text), 220);
   };
 
-  const handleVoicePick = () => {
-    voice.start((text) => { handleQuery(text); });
+  const onSelectSuggestion = (s: NominatimResult) => {
+    const lat = parseFloat(s.lat);
+    const lon = parseFloat(s.lon);
+    setSelected({ latitude: lat, longitude: lon });
+    setCenter({ latitude: lat, longitude: lon });
+    setQuery(s.display_name.split(',')[0]);
+    setSuggestions([]);
+    // navigate to Directions if desired
+    // @ts-ignore
+    navigation.navigate && (navigation as any).navigate('Directions', { destination: { latitude: lat, longitude: lon }, destinationName: s.display_name.split(',')[0] });
   };
-
-  // Enrich top results with details and distances when results change
-  React.useEffect(() => {
-    let mounted = true;
-    const enrich = async () => {
-      if (!results || results.length === 0) return;
-      const max = Math.min(8, results.length);
-      const concurrency = 4;
-  const out = results.map((r: any) => ({ ...r }));
-  // mark top items as loading
-  for (let i = 0; i < Math.min(max, out.length); i++) out[i]._loading = true;
-  if (mounted) setResults(out);
-      let idx = 0;
-      const workers: Promise<void>[] = [];
-      const doFetch = async (i: number) => {
-        const r = out[i];
-        try {
-          const details = await getPlaceDetailsFromMaps(r.place_id || r.id);
-          if (details) {
-            r.rating = details.rating;
-            r.opening_hours = details.opening_hours;
-            r.address = r.address || details.address || r.description;
-            if (location && details.location) {
-              r.distanceMeters = distanceMeters({ latitude: location.latitude, longitude: location.longitude }, details.location);
-            }
-          }
-        } catch (e) {
-          // ignore per-item errors
-        } finally {
-          r._loading = false;
-          if (mounted) setResults([...out]);
-        }
-      };
-      while (idx < max) {
-        while (workers.length < concurrency && idx < max) {
-          const i = idx++;
-          const p = doFetch(i).then(() => {
-            // remove finished
-            const k = workers.indexOf(p as any);
-            if (k >= 0) workers.splice(k, 1);
-          });
-          workers.push(p as any);
-        }
-        // wait for one to finish
-        await Promise.race(workers);
-      }
-      await Promise.all(workers);
-      if (mounted) setResults(out);
-    };
-    enrich();
-    return () => { mounted = false; };
-  }, [results, location]);
 
   return (
     <CupertinoLayout>
       <View style={styles.container}>
-        {/* Top: Search Bar */}
-        <View style={styles.topSection}>
-          <View style={styles.searchContainer}>
-            <SearchBar
-              onPlaceSelect={handlePlaceSelect}
-              initialQuery={initialQuery}
-              onSubmit={handleSubmit}
-            />
-          </View>
-          <TouchableOpacity
-            style={[styles.voiceButton, voice.listening && styles.voiceButtonActive]}
-            onPress={handleVoicePick}
-          >
-            <Text style={styles.voiceIcon}>{voice.listening ? '🎙️' : '🎤'}</Text>
-          </TouchableOpacity>
+        {/* Professional Header */}
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Search Places</Text>
+          <Text style={styles.headerSubtitle}>Find locations in Ethiopia</Text>
         </View>
 
-        {/* Middle: Map with pins */}
-        <View style={styles.mapSection}>
-          <CustomMapView
-            initialRegion={addisAbabaRegion}
-            route={selectedPlace ? [selectedPlace] : undefined}
-            originLngLat={location ? [location.longitude, location.latitude] : undefined}
-            destinationLngLat={selectedPlace ? [selectedPlace.longitude, selectedPlace.latitude] : undefined}
-          />
+        {/* Search Section */}
+        <View style={styles.searchSection}>
+          <View style={styles.searchContainerWeb}>
+            <TextInput
+              placeholder="Search places, addresses..."
+              placeholderTextColor="#888"
+              value={query}
+              onChangeText={onChangeText}
+              style={styles.searchInput}
+              autoCorrect={false}
+              autoCapitalize="none"
+            />
+            {loading && <ActivityIndicator style={{ marginLeft: 8 }} color="#00FFFF" />}
+          </View>
+        </View>
 
-          {/* Floating Action Button: Locate Me */}
+        <View style={styles.mapSection}>
+          <WebLeafletMap center={center} marker={selected} />
+
           <TouchableOpacity
             style={styles.locateButton}
             onPress={() => {
-              // This will trigger the map to re-center on user location
-              // The CustomMapView should handle this through the location prop
-              console.log('Locate me pressed - re-centering on user location');
+              if (location && location.latitude) setCenter({ latitude: location.latitude, longitude: location.longitude });
             }}
           >
             <Text style={styles.locateIcon}>📍</Text>
           </TouchableOpacity>
         </View>
 
-        {/* Bottom: List of results (scrollable) - Only show when user submits search */}
         <View style={styles.bottomSection}>
-          {results.length > 0 && query.length > 2 && (
-            <>
-              <View style={styles.resultsHeader}>
-                <Text style={styles.resultsTitle}>Search Results</Text>
-                {isLoading && <Text style={styles.loadingText}>Searching...</Text>}
-              </View>
-              <View style={styles.resultsScroll}>
-                {results.map((result, index) => (
-                  <TouchableOpacity
-                    key={result.place_id || index}
-                    style={styles.resultItem}
-                    onPress={() => handlePlaceSelect(result.place_id || result.id, result.description || result.name)}
-                  >
-                    <View style={styles.resultLeft}>
-                      <View style={styles.resultIcon}>
-                        <Text style={styles.resultIconText}>
-                          {result.category === 'Food & Drink' ? '🍽️' :
-                           result.category === 'Health' ? '🏥' :
-                           result.category === 'Finance' ? '💰' :
-                           result.category === 'Education' ? '📚' :
-                           result.category === 'Transportation' ? '🚌' : '📍'}
-                        </Text>
+          <View style={styles.dropdownWrapper}>
+            {suggestions.length > 0 && (
+              <ScrollView style={styles.dropdown}>
+                {suggestions.map((s) => {
+                  const cat = mapClassTypeToCategory(s.class, s.type);
+                  return (
+                    <TouchableOpacity key={String(s.place_id)} style={styles.dropItem} onPress={() => onSelectSuggestion(s)}>
+                      <View style={styles.dropLeft}>
+                        <Text style={styles.dropIcon}>{cat.icon}</Text>
+                        <View style={{ flex: 1 }}>
+                          <Text numberOfLines={1} style={styles.dropTitle}>{highlightMatch(s.display_name.split(',')[0], query)}</Text>
+                          <Text numberOfLines={1} style={styles.dropSubtitle}>{s.type ? `${cat.label} • ${s.type}` : cat.label}</Text>
+                        </View>
                       </View>
-                      <View style={styles.resultInfo}>
-                        <Text style={styles.resultName} numberOfLines={1}>
-                          {result.structured_formatting?.main_text || result.description?.split(',')[0] || 'Unknown Place'}
-                        </Text>
-                        <Text style={styles.resultAddress} numberOfLines={1}>
-                          {result.structured_formatting?.secondary_text || result.description?.split(',').slice(1).join(', ') || result.category}
-                        </Text>
-                      </View>
-                    </View>
-                    <TouchableOpacity
-                      style={styles.resultNavigate}
-                      onPress={() => {
-                        if (location) {
-                          (navigation as any).navigate('Directions', {
-                            destination: {
-                              latitude: result.location?.lat || 0,
-                              longitude: result.location?.lng || 0
-                            },
-                            destinationName: result.description?.split(',')[0] || 'Destination'
-                          });
-                        }
-                      }}
-                    >
-                      <Text style={styles.navigateText}>Navigate</Text>
                     </TouchableOpacity>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </>
-          )}
+                  );
+                })}
+              </ScrollView>
+            )}
+            {!loading && suggestions.length === 0 && query.length > 0 && (
+              <View style={styles.noResults}><Text style={{ color: '#CCC' }}>No results nearby</Text></View>
+            )}
+          </View>
         </View>
       </View>
     </CupertinoLayout>
@@ -309,6 +266,35 @@ const SearchScreen: React.FC = () => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
+
+  // Professional Header
+  header: {
+    padding: 24,
+    paddingTop: 60,
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.95)'
+  },
+  headerTitle: {
+    color: '#FFF',
+    fontSize: 28,
+    fontWeight: 'bold',
+    marginBottom: 8,
+    textAlign: 'center'
+  },
+  headerSubtitle: {
+    color: '#CCC',
+    fontSize: 16,
+    textAlign: 'center'
+  },
+
+  // Search Section
+  searchSection: {
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    backgroundColor: 'rgba(0,0,0,0.9)',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.1)'
+  },
 
   // Top Section: Search Bar
   topSection: {
@@ -538,6 +524,44 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500'
   }
+  , // comma to continue styles object
+  // New styles for web search dropdown
+  searchContainerWeb: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10
+  },
+  searchInput: {
+    flex: 1,
+    color: '#FFF',
+    fontSize: 16,
+    padding: 8
+  },
+  dropdownWrapper: {
+    paddingHorizontal: 16,
+    paddingTop: 8
+  },
+  dropdown: {
+    maxHeight: 280,
+    backgroundColor: 'rgba(255,255,255,0.02)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)'
+  },
+  dropItem: {
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.03)'
+  },
+  dropLeft: { flexDirection: 'row', alignItems: 'center' },
+  dropIcon: { fontSize: 20, marginRight: 12 },
+  dropTitle: { color: '#FFF', fontSize: 15, fontWeight: '600' },
+  dropSubtitle: { color: '#9AA', fontSize: 12, marginTop: 2 },
+  noResults: { padding: 12, alignItems: 'center' }
 });
 
 export default SearchScreen;

@@ -12,28 +12,51 @@ interface LeafletMapProps {
   style?: React.CSSProperties;
 }
 
-// Simple fallback component for now
+// Interactive OpenStreetMap embed with markers
 const LeafletMap: React.FC<LeafletMapProps> = ({
   center = [9.03, 38.74], // Addis Ababa default
   zoom = 13,
   markers = [],
   onMarkerClick,
-  style = { height: '100%', width: '100%', backgroundColor: '#f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'center' }
+  style = { height: '100%', width: '100%' }
 }) => {
+  const [lat, lng] = center;
+
+  // Create marker parameters for OpenStreetMap embed
+  const markerParams = markers.map(marker => {
+    const [mLat, mLng] = marker.position;
+    return `marker=${mLat},${mLng}`;
+  }).join('&');
+
+  // OpenStreetMap embed URL with markers
+  const mapUrl = `https://www.openstreetmap.org/export/embed.html?bbox=${lng - 0.01},${lat - 0.01},${lng + 0.01},${lat + 0.01}&layer=mapnik&${markerParams}`;
+
   return (
-    <div style={style}>
-      <div style={{ textAlign: 'center', color: '#666' }}>
-        <div style={{ fontSize: '48px', marginBottom: '16px' }}>🗺️</div>
-        <div style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '8px' }}>
-          Interactive Map
-        </div>
-        <div style={{ fontSize: '14px' }}>
-          Addis Ababa • Zoom: {zoom}
-        </div>
-        <div style={{ fontSize: '12px', marginTop: '8px', color: '#999' }}>
+    <div style={{ ...style, position: 'relative' }}>
+      <iframe
+        src={mapUrl}
+        style={{
+          width: '100%',
+          height: '100%',
+          border: 'none',
+          borderRadius: '8px'
+        }}
+        title="OpenStreetMap"
+      />
+      {markers.length > 0 && (
+        <div style={{
+          position: 'absolute',
+          top: 8,
+          right: 8,
+          backgroundColor: 'rgba(0,0,0,0.7)',
+          color: 'white',
+          padding: '4px 8px',
+          borderRadius: '4px',
+          fontSize: '12px'
+        }}>
           {markers.length} location{markers.length !== 1 ? 's' : ''} marked
         </div>
-      </div>
+      )}
     </div>
   );
 };
