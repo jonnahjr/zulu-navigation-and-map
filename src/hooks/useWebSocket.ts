@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { io, Socket } from 'socket.io-client';
 
 interface User {
   userId: string;
@@ -25,8 +24,9 @@ interface TrafficIncident {
 }
 
 export const useWebSocket = (userId: string, userName: string) => {
-  const [socket, setSocket] = useState<Socket | null>(null);
+  const [socket, setSocket] = useState<any | null>(null);
   const [isConnected, setIsConnected] = useState(false);
+  const [connectionAttempted, setConnectionAttempted] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState<User[]>([]);
   const [userLocations, setUserLocations] = useState<LocationData[]>([]);
   const [trafficData, setTrafficData] = useState<TrafficIncident[]>([]);
@@ -37,82 +37,113 @@ export const useWebSocket = (userId: string, userName: string) => {
   // Shared routes
   const [sharedRoutes, setSharedRoutes] = useState<any[]>([]);
 
-  const socketRef = useRef<Socket | null>(null);
+  const socketRef = useRef<any | null>(null);
 
   // Initialize socket connection
   useEffect(() => {
     const SERVER_URL = __DEV__ ? 'http://localhost:3001' : 'https://your-production-server.com';
 
-    const newSocket = io(SERVER_URL, {
-      transports: ['websocket', 'polling'],
-      timeout: 20000,
-    });
+    // Dynamically import socket.io-client to avoid bundling issues
+    const initSocket = async () => {
+      setConnectionAttempted(true);
 
-    socketRef.current = newSocket;
-    setSocket(newSocket);
+      // Add a timeout to prevent hanging
+      const timeout = setTimeout(() => {
+        console.warn('WebSocket connection timeout - continuing without real-time features');
+        setConnectionAttempted(true);
+        setIsConnected(false);
+      }, 8000); // 8 second timeout
 
-    // Connection events
-    newSocket.on('connect', () => {
-      console.log('🔗 Connected to real-time server');
-      setIsConnected(true);
+      try {
+        const { io } = await import('socket.io-client');
+        clearTimeout(timeout);
 
-      // Join with user data
-      newSocket.emit('join', { userId, userName });
-    });
+        const newSocket = io(SERVER_URL, {
+          transports: ['websocket', 'polling'],
+          timeout: 5000, // Reduced timeout
+        });
 
-    newSocket.on('disconnect', () => {
-      console.log('🔌 Disconnected from real-time server');
-      setIsConnected(false);
-    });
+        socketRef.current = newSocket;
+        setSocket(newSocket);
 
-    // User count updates
-    newSocket.on('userCount', (count: number) => {
-      console.log(`👥 ${count} users online`);
-    });
+        // Connection events
+        newSocket.on('connect', () => {
+          console.log('🔗 Connected to real-time server');
+          setIsConnected(true);
 
-    // Online users list
-    newSocket.on('onlineUsers', (users: User[]) => {
-      setOnlineUsers(users);
-    });
+          // Join with user data
+          newSocket.emit('join', { userId, userName });
+        });
 
-    // Real-time location updates
-    newSocket.on('userLocationUpdate', (location: LocationData) => {
-      setUserLocations(prev => {
-        const existing = prev.findIndex(loc => loc.userId === location.userId);
-        if (existing >= 0) {
-          const updated = [...prev];
-          updated[existing] = location;
-          return updated;
-        }
-        return [...prev, location];
-      });
-    });
+        newSocket.on('disconnect', () => {
+          console.log('🔌 Disconnected from real-time server');
+          setIsConnected(false);
+        });
 
-    // User disconnected
-    newSocket.on('userDisconnected', (disconnectedUserId: string) => {
-      setUserLocations(prev => prev.filter(loc => loc.userId !== disconnectedUserId));
-    });
+        newSocket.on('connect_error', (error) => {
+          console.warn('WebSocket connection error:', error);
+          setIsConnected(false);
+        });
 
-    // Traffic updates
-    newSocket.on('trafficUpdate', (traffic: TrafficIncident[]) => {
-      setTrafficData(traffic);
-    });
+        // User count updates
+        newSocket.on('userCount', (count: number) => {
+          console.log(`👥 ${count} users online`);
+        });
 
-    // Emergency alerts
-    newSocket.on('emergencyAlert', (alert: any) => {
-      setEmergencyAlerts(prev => [alert, ...prev]);
-      // Could trigger local notification here
-      console.log('🚨 Emergency alert received:', alert);
-    });
+        // Online users list
+        newSocket.on('onlineUsers', (users: User[]) => {
+          setOnlineUsers(users);
+        });
 
-    // Shared routes
-    newSocket.on('routeShared', (routeData: any) => {
-      setSharedRoutes(prev => [routeData, ...prev]);
-    });
+        // Real-time location updates
+        newSocket.on('userLocationUpdate', (location: LocationData) => {
+          setUserLocations(prev => {
+            const existing = prev.findIndex(loc => loc.userId === location.userId);
+            if (existing >= 0) {
+              const updated = [...prev];
+              updated[existing] = location;
+              return updated;
+            }
+            return [...prev, location];
+          });
+        });
+
+        // User disconnected
+        newSocket.on('userDisconnected', (disconnectedUserId: string) => {
+          setUserLocations(prev => prev.filter(loc => loc.userId !== disconnectedUserId));
+        });
+
+        // Traffic updates
+        newSocket.on('trafficUpdate', (traffic: TrafficIncident[]) => {
+          setTrafficData(traffic);
+        });
+
+        // Emergency alerts
+        newSocket.on('emergencyAlert', (alert: any) => {
+          setEmergencyAlerts(prev => [alert, ...prev]);
+          // Could trigger local notification here
+          console.log('🚨 Emergency alert received:', alert);
+        });
+
+        // Shared routes
+        newSocket.on('routeShared', (routeData: any) => {
+          setSharedRoutes(prev => [routeData, ...prev]);
+        });
+
+      } catch (error) {
+        console.warn('Failed to initialize WebSocket:', error);
+        setIsConnected(false);
+        setConnectionAttempted(true);
+      }
+    };
+
+    initSocket();
 
     // Cleanup on unmount
     return () => {
-      newSocket.close();
+      if (socketRef.current) {
+        socketRef.current.close();
+      }
     };
   }, [userId, userName]);
 
@@ -172,6 +203,7 @@ export const useWebSocket = (userId: string, userName: string) => {
   return {
     // Connection state
     isConnected,
+    connectionAttempted,
     socket,
 
     // Data

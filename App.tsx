@@ -11,7 +11,7 @@ export const RealtimeContext = React.createContext<any>(null);
 const App: React.FC = () => {
   const [ReadyRoot, setReadyRoot] = useState<React.ComponentType | null>(null);
 
-  // Initialize WebSocket connection
+  // Initialize WebSocket connection (optional)
   const realtimeData = useWebSocket('user_' + Date.now(), 'Navigator User');
 
   useEffect(() => {
@@ -45,14 +45,16 @@ const App: React.FC = () => {
       console.warn('Failed to require app modules dynamically', e);
     }
     return () => { mounted = false; };
-  }, [realtimeData]);
+  }, []); // Remove realtimeData dependency to avoid waiting for WebSocket
 
   if (!ReadyRoot) {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#000' }}>
         <Text style={{ color: '#FFF', fontSize: 18 }}>Loading Zulu Navigator...</Text>
         <Text style={{ color: '#00FFFF', fontSize: 14, marginTop: 10 }}>
-          {realtimeData.isConnected ? '🟢 Connected to real-time server' : '🟡 Connecting...'}
+          {realtimeData.connectionAttempted
+            ? (realtimeData.isConnected ? '🟢 Real-time connected' : '🔴 Real-time offline')
+            : '🟡 Initializing...'}
         </Text>
       </View>
     );
