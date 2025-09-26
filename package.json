@@ -25,11 +25,13 @@
     "expo-speech": "~11.7.0",
     "expo-status-bar": "~1.11.1",
     "express": "^5.1.0",
+    "leaflet": "^1.9.4",
     "mapbox-gl": "^3.15.0",
     "nativewind": "^4.2.1",
     "node-fetch": "^2.7.0",
     "react": "18.2.0",
     "react-dom": "18.2.0",
+    "react-leaflet": "^4.2.1",
     "react-map-gl": "^8.0.4",
     "react-native": "0.73.6",
     "react-native-maps": "1.10.0",
@@ -40,6 +42,7 @@
     "zustand": "^4.4.1"
   },
   "devDependencies": {
+    "@types/leaflet": "^1.9.20",
     "@types/react": "~18.2.45",
     "@types/react-map-gl": "^6.1.7",
     "@types/react-native": "0.73.0",

@@ -2,25 +2,25 @@ import axios from 'axios';
 
 export async function fetchAutocomplete(input: string, types?: string) {
   try {
-    // Addis Ababa bounding box (approximate)
-    const addisAbabaBounds = {
-      minLon: 38.6,  // West
-      minLat: 8.8,   // South
-      maxLon: 38.9,  // East
-      maxLat: 9.1    // North
-    };
-
     const params: any = {
       format: 'json',
       q: input,
-      limit: 15,
-      // Focus on Addis Ababa area
-      viewbox: `${addisAbabaBounds.minLon},${addisAbabaBounds.minLat},${addisAbabaBounds.maxLon},${addisAbabaBounds.maxLat}`,
-      bounded: 1,
-      // Prioritize results within the viewbox
-      extratags: 1,
-      addressdetails: 1
+      limit: 10,
+      countrycodes: 'et', // Only return results in Ethiopia
+      addressdetails: 1,
+      extratags: 1
     };
+
+    // Default location bias = Addis Ababa (lat=9.03, lon=38.74, radius=50km)
+    // Using viewboxlbrt for location biasing (left,bottom,right,top)
+    const addisCenterLat = 9.03;
+    const addisCenterLon = 38.74;
+    const radiusKm = 50;
+    const latDelta = radiusKm / 111; // ~1 degree latitude = 111km
+    const lonDelta = radiusKm / (111 * Math.cos(addisCenterLat * Math.PI / 180)); // Adjust for longitude
+
+    params.viewbox = `${addisCenterLon - lonDelta},${addisCenterLat - latDelta},${addisCenterLon + lonDelta},${addisCenterLat + latDelta}`;
+    params.bounded = 1;
 
     if (types) params.type = types;
 
