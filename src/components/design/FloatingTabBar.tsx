@@ -31,9 +31,9 @@ const FloatingTabBar = ({ state, descriptors, navigation }: any) => {
 const styles = StyleSheet.create({
   container: {
     position: 'absolute',
-    left: 20,
-    right: 20,
+    left: '50%',
     bottom: 24,
+    transform: [{ translateX: '-50%' }],
     backgroundColor: colors.surfaceElevated,
     borderRadius: 28,
     padding: 8,
