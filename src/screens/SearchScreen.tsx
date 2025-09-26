@@ -21,18 +21,60 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 const SearchScreen: React.FC = () => {
   const [selectedPlace, setSelectedPlace] = useState<{ latitude: number; longitude: number } | null>(null);
   const [results, setResults] = useState<any[]>([]);
+  const [popularPlaces, setPopularPlaces] = useState<any[]>([]);
   const [filter, setFilter] = useState<string>('All');
+  const [isLoading, setIsLoading] = useState(false);
   const voice = useVoiceSearch();
   const navigation = useNavigation();
   const route = useRoute();
   const initialQuery = (route.params as any)?.initialQuery || '';
   const [query, setQuery] = useState(initialQuery);
   const { location } = useLocation();
+
+  // Addis Ababa center coordinates
+  const addisAbabaCenter = { latitude: 9.03, longitude: 38.74 };
   const addisAbabaRegion = {
     latitude: 9.03,
     longitude: 38.74,
     latitudeDelta: 0.1,
     longitudeDelta: 0.1,
+  };
+
+  // Load popular places on mount
+  React.useEffect(() => {
+    loadPopularPlaces();
+  }, []);
+
+  const loadPopularPlaces = async () => {
+    try {
+      // Load some popular places in Addis Ababa
+      const popularQueries = [
+        'Shiromeda Market',
+        'National Museum of Ethiopia',
+        'Holy Trinity Cathedral',
+        'Red Terror Martyrs Memorial',
+        'Entoto Hill'
+      ];
+
+      const popularResults = [];
+      for (const query of popularQueries.slice(0, 3)) {
+        try {
+          const places = await getGlobalPlaces(query);
+          if (places && places.length > 0) {
+            popularResults.push({
+              ...places[0],
+              isPopular: true,
+              category: 'Popular'
+            });
+          }
+        } catch (e) {
+          console.warn(`Failed to load popular place: ${query}`, e);
+        }
+      }
+      setPopularPlaces(popularResults);
+    } catch (error) {
+      console.warn('Failed to load popular places', error);
+    }
   };
 
   const handleSubmit = async (q: string) => {
@@ -74,13 +116,21 @@ const SearchScreen: React.FC = () => {
 
   const handleQuery = async (q: string) => {
     setQuery(q);
-    if (!q || q.length < 2) { setResults([]); return; }
+    if (!q || q.length < 2) {
+      setResults([]);
+      setIsLoading(false);
+      return;
+    }
+
+    setIsLoading(true);
     try {
       const res = await fetchAutocomplete(q, undefined);
       setResults(res as any[]);
     } catch (e) {
       console.warn('autocomplete failed', e);
       setResults([]);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -148,22 +198,80 @@ const SearchScreen: React.FC = () => {
   return (
     <CupertinoLayout>
       <View style={styles.container}>
-        <BlurFallback style={{ marginBottom: 10 }}>
-          <SearchBar onPlaceSelect={handlePlaceSelect} initialQuery={initialQuery} onSubmit={handleSubmit} />
+        {/* Search Header */}
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Search Addis Ababa</Text>
+          <Text style={styles.headerSubtitle}>Find places, restaurants, and more</Text>
+        </View>
+
+        {/* Search Bar */}
+        <BlurFallback style={styles.searchContainer}>
+          <SearchBar
+            onPlaceSelect={handlePlaceSelect}
+            initialQuery={initialQuery}
+            onSubmit={handleSubmit}
+          />
         </BlurFallback>
-        <SearchFilters selected={filter} onSelect={(s) => setFilter(s)} />
-        <TrendingList onPick={handleTrendingPick} />
-        <ResultsList results={results} onSelect={(r) => handlePlaceSelect(r.place_id || r.id, r.description || r.name)} />
-        <View style={{ flex: 1, marginTop: 12 }}>
+
+        {/* Voice Search Button */}
+        <View style={styles.voiceButtonContainer}>
+          <TouchableOpacity
+            style={[styles.voiceButton, voice.listening && styles.voiceButtonActive]}
+            onPress={handleVoicePick}
+          >
+            <Text style={styles.voiceIcon}>{voice.listening ? '🎙️' : '🎤'}</Text>
+            <Text style={styles.voiceText}>
+              {voice.listening ? 'Listening...' : 'Voice Search'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Search Results */}
+        {results.length > 0 && (
+          <View style={styles.resultsSection}>
+            <Text style={styles.sectionTitle}>Search Results</Text>
+            {isLoading && <Text style={styles.loadingText}>Searching...</Text>}
+            <ResultsList
+              results={results}
+              onSelect={(r) => handlePlaceSelect(r.place_id || r.id, r.description || r.name)}
+            />
+          </View>
+        )}
+
+        {/* Popular Places (when no search) */}
+        {results.length === 0 && !isLoading && (
+          <>
+            <View style={styles.popularSection}>
+              <Text style={styles.sectionTitle}>Popular Places</Text>
+              {popularPlaces.length > 0 ? (
+                <ResultsList
+                  results={popularPlaces}
+                  onSelect={(r) => handlePlaceSelect(r.place_id || r.id, r.description || r.name)}
+                />
+              ) : (
+                <Text style={styles.loadingText}>Loading popular places...</Text>
+              )}
+            </View>
+
+            <TrendingList onPick={handleTrendingPick} />
+          </>
+        )}
+
+        {/* Map */}
+        <View style={styles.mapContainer}>
           <CustomMapView
             initialRegion={addisAbabaRegion}
             route={selectedPlace ? [selectedPlace] : undefined}
             originLngLat={location ? [location.longitude, location.latitude] : undefined}
             destinationLngLat={selectedPlace ? [selectedPlace.longitude, selectedPlace.latitude] : undefined}
           />
-        </View>
-        <View style={{ position: 'absolute', right: 18, top: 18 }}>
-          <TouchableOpacity style={{ backgroundColor: '#00FFFF', padding: 14, borderRadius: 22 }} onPress={handleVoicePick}><Text style={{ color: '#000', fontSize: 16 }}>{voice.listening ? 'Listening…' : '🎤'}</Text></TouchableOpacity>
+          {selectedPlace && (
+            <View style={styles.mapOverlay}>
+              <Text style={styles.mapOverlayText}>
+                📍 Selected location
+              </Text>
+            </View>
+          )}
         </View>
       </View>
     </CupertinoLayout>
@@ -171,7 +279,43 @@ const SearchScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 8 },
+  container: { flex: 1 },
+  header: { padding: 20, paddingBottom: 10 },
+  headerTitle: { color: '#FFF', fontSize: 24, fontWeight: 'bold', marginBottom: 4 },
+  headerSubtitle: { color: '#CCC', fontSize: 16 },
+  searchContainer: { marginHorizontal: 20, marginBottom: 15, borderRadius: 12 },
+  voiceButtonContainer: { alignItems: 'center', marginBottom: 20 },
+  voiceButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 255, 255, 0.1)',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 25,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 255, 255, 0.3)'
+  },
+  voiceButtonActive: {
+    backgroundColor: 'rgba(0, 255, 255, 0.2)',
+    borderColor: '#00FFFF'
+  },
+  voiceIcon: { fontSize: 18, marginRight: 8 },
+  voiceText: { color: '#00FFFF', fontSize: 16, fontWeight: '500' },
+  resultsSection: { paddingHorizontal: 20, marginBottom: 20 },
+  popularSection: { paddingHorizontal: 20, marginBottom: 20 },
+  sectionTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold', marginBottom: 12 },
+  loadingText: { color: '#CCC', fontSize: 14, textAlign: 'center', marginVertical: 10 },
+  mapContainer: { flex: 1, margin: 20, borderRadius: 12, overflow: 'hidden', position: 'relative' },
+  mapOverlay: {
+    position: 'absolute',
+    top: 12,
+    left: 12,
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20
+  },
+  mapOverlayText: { color: '#FFF', fontSize: 12, fontWeight: '500' }
 });
 
 export default SearchScreen;
