@@ -198,14 +198,8 @@ const SearchScreen: React.FC = () => {
   return (
     <CupertinoLayout>
       <View style={styles.container}>
-        {/* Clean Header */}
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>Discover Addis Ababa</Text>
-          <Text style={styles.headerSubtitle}>Find places, explore the city</Text>
-        </View>
-
-        {/* Search Section */}
-        <View style={styles.searchSection}>
+        {/* Top: Search Bar */}
+        <View style={styles.topSection}>
           <BlurFallback style={styles.searchContainer}>
             <SearchBar
               onPlaceSelect={handlePlaceSelect}
@@ -213,143 +207,146 @@ const SearchScreen: React.FC = () => {
               onSubmit={handleSubmit}
             />
           </BlurFallback>
-
-          {/* Voice Search */}
           <TouchableOpacity
             style={[styles.voiceButton, voice.listening && styles.voiceButtonActive]}
             onPress={handleVoicePick}
           >
             <Text style={styles.voiceIcon}>{voice.listening ? '🎙️' : '🎤'}</Text>
-            <Text style={styles.voiceText}>
-              {voice.listening ? 'Listening...' : 'Voice'}
-            </Text>
           </TouchableOpacity>
         </View>
 
-        {/* Main Content Area */}
-        <View style={styles.contentArea}>
-          {/* Search Results or Popular Places */}
-          {(results.length > 0 || (results.length === 0 && !isLoading)) && (
-            <View style={styles.resultsSection}>
-              {results.length > 0 ? (
-                <>
-                  <View style={styles.sectionHeader}>
-                    <Text style={styles.sectionTitle}>Search Results</Text>
-                    {isLoading && <Text style={styles.loadingText}>Searching...</Text>}
-                  </View>
-                  <View style={styles.resultsList}>
-                    {results.slice(0, 6).map((result, index) => (
-                      <TouchableOpacity
-                        key={result.place_id || index}
-                        style={styles.resultCard}
-                        onPress={() => handlePlaceSelect(result.place_id || result.id, result.description || result.name)}
-                      >
-                        <View style={styles.resultIcon}>
-                          <Text style={styles.resultIconText}>
-                            {result.category === 'Food & Drink' ? '🍽️' :
-                             result.category === 'Health' ? '🏥' :
-                             result.category === 'Finance' ? '💰' :
-                             result.category === 'Education' ? '📚' :
-                             result.category === 'Transportation' ? '🚌' : '📍'}
-                          </Text>
-                        </View>
-                        <View style={styles.resultContent}>
-                          <Text style={styles.resultTitle} numberOfLines={1}>
-                            {result.structured_formatting?.main_text || result.description?.split(',')[0] || 'Unknown Place'}
-                          </Text>
-                          <Text style={styles.resultSubtitle} numberOfLines={1}>
-                            {result.structured_formatting?.secondary_text || result.description?.split(',').slice(1).join(', ') || result.category}
-                          </Text>
-                        </View>
-                        <TouchableOpacity style={styles.resultAction}>
-                          <Text style={styles.resultActionText}>→</Text>
-                        </TouchableOpacity>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </>
-              ) : (
-                <>
-                  <View style={styles.sectionHeader}>
-                    <Text style={styles.sectionTitle}>Explore Popular Places</Text>
-                  </View>
-                  <View style={styles.popularGrid}>
-                    {popularPlaces.slice(0, 6).map((place, index) => (
-                      <TouchableOpacity
-                        key={index}
-                        style={styles.popularCard}
-                        onPress={() => handlePlaceSelect(place.place_id || place.id, place.description || place.name)}
-                      >
-                        <Text style={styles.popularIcon}>
-                          {place.name?.includes('Museum') ? '🏛️' :
-                           place.name?.includes('Cathedral') ? '⛪' :
-                           place.name?.includes('Market') ? '🛒' :
-                           place.name?.includes('Hill') ? '🏔️' : '📍'}
+        {/* Middle: Map with pins */}
+        <View style={styles.mapSection}>
+          <CustomMapView
+            initialRegion={addisAbabaRegion}
+            route={selectedPlace ? [selectedPlace] : undefined}
+            originLngLat={location ? [location.longitude, location.latitude] : undefined}
+            destinationLngLat={selectedPlace ? [selectedPlace.longitude, selectedPlace.latitude] : undefined}
+          />
+
+          {/* Floating Action Button: Locate Me */}
+          <TouchableOpacity
+            style={styles.locateButton}
+            onPress={() => {
+              // This will trigger the map to re-center on user location
+              // The CustomMapView should handle this through the location prop
+              console.log('Locate me pressed - re-centering on user location');
+            }}
+          >
+            <Text style={styles.locateIcon}>📍</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Bottom: List of results (scrollable) */}
+        <View style={styles.bottomSection}>
+          {results.length > 0 ? (
+            <>
+              <View style={styles.resultsHeader}>
+                <Text style={styles.resultsTitle}>Search Results</Text>
+                {isLoading && <Text style={styles.loadingText}>Searching...</Text>}
+              </View>
+              <View style={styles.resultsScroll}>
+                {results.map((result, index) => (
+                  <TouchableOpacity
+                    key={result.place_id || index}
+                    style={styles.resultItem}
+                    onPress={() => handlePlaceSelect(result.place_id || result.id, result.description || result.name)}
+                  >
+                    <View style={styles.resultLeft}>
+                      <View style={styles.resultIcon}>
+                        <Text style={styles.resultIconText}>
+                          {result.category === 'Food & Drink' ? '🍽️' :
+                           result.category === 'Health' ? '🏥' :
+                           result.category === 'Finance' ? '💰' :
+                           result.category === 'Education' ? '📚' :
+                           result.category === 'Transportation' ? '🚌' : '📍'}
                         </Text>
-                        <Text style={styles.popularName} numberOfLines={2}>
+                      </View>
+                      <View style={styles.resultInfo}>
+                        <Text style={styles.resultName} numberOfLines={1}>
+                          {result.structured_formatting?.main_text || result.description?.split(',')[0] || 'Unknown Place'}
+                        </Text>
+                        <Text style={styles.resultAddress} numberOfLines={1}>
+                          {result.structured_formatting?.secondary_text || result.description?.split(',').slice(1).join(', ') || result.category}
+                        </Text>
+                      </View>
+                    </View>
+                    <TouchableOpacity
+                      style={styles.resultNavigate}
+                      onPress={() => {
+                        if (location) {
+                          (navigation as any).navigate('Directions', {
+                            destination: {
+                              latitude: result.location?.lat || 0,
+                              longitude: result.location?.lng || 0
+                            },
+                            destinationName: result.description?.split(',')[0] || 'Destination'
+                          });
+                        }
+                      }}
+                    >
+                      <Text style={styles.navigateText}>Navigate</Text>
+                    </TouchableOpacity>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </>
+          ) : (
+            <>
+              <View style={styles.popularHeader}>
+                <Text style={styles.popularTitle}>Popular Places</Text>
+              </View>
+              <View style={styles.popularScroll}>
+                {popularPlaces.map((place, index) => (
+                  <TouchableOpacity
+                    key={index}
+                    style={styles.popularItem}
+                    onPress={() => handlePlaceSelect(place.place_id || place.id, place.description || place.name)}
+                  >
+                    <View style={styles.popularLeft}>
+                      <Text style={styles.popularIcon}>
+                        {place.name?.includes('Museum') ? '🏛️' :
+                         place.name?.includes('Cathedral') ? '⛪' :
+                         place.name?.includes('Market') ? '🛒' :
+                         place.name?.includes('Hill') ? '🏔️' : '📍'}
+                      </Text>
+                      <View style={styles.popularInfo}>
+                        <Text style={styles.popularName} numberOfLines={1}>
                           {place.name}
                         </Text>
+                        <Text style={styles.popularType}>Popular</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.popularArrow}>›</Text>
+                  </TouchableOpacity>
+                ))}
+
+                {/* Quick Search Categories */}
+                <View style={styles.categoriesContainer}>
+                  <Text style={styles.categoriesTitle}>Quick Search</Text>
+                  <View style={styles.categoriesList}>
+                    {[
+                      { name: 'Restaurants', icon: '🍽️', query: 'restaurants in Addis Ababa' },
+                      { name: 'Hotels', icon: '🏨', query: 'hotels in Addis Ababa' },
+                      { name: 'Banks', icon: '🏦', query: 'banks in Addis Ababa' },
+                      { name: 'Hospitals', icon: '🏥', query: 'hospitals in Addis Ababa' },
+                      { name: 'Shopping', icon: '🛍️', query: 'shopping in Addis Ababa' },
+                      { name: 'Transport', icon: '🚌', query: 'bus stations in Addis Ababa' }
+                    ].map((category, index) => (
+                      <TouchableOpacity
+                        key={index}
+                        style={styles.categoryItem}
+                        onPress={() => handleTrendingPick(category.query)}
+                      >
+                        <Text style={styles.categoryIcon}>{category.icon}</Text>
+                        <Text style={styles.categoryText}>{category.name}</Text>
                       </TouchableOpacity>
                     ))}
                   </View>
-
-                  {/* Quick Search Categories */}
-                  <View style={styles.categoriesSection}>
-                    <Text style={styles.categoriesTitle}>Quick Search</Text>
-                    <View style={styles.categoriesGrid}>
-                      {[
-                        { name: 'Restaurants', icon: '🍽️', query: 'restaurants in Addis Ababa' },
-                        { name: 'Hotels', icon: '🏨', query: 'hotels in Addis Ababa' },
-                        { name: 'Banks', icon: '🏦', query: 'banks in Addis Ababa' },
-                        { name: 'Hospitals', icon: '🏥', query: 'hospitals in Addis Ababa' },
-                        { name: 'Shopping', icon: '🛍️', query: 'shopping in Addis Ababa' },
-                        { name: 'Transport', icon: '🚌', query: 'bus stations in Addis Ababa' }
-                      ].map((category, index) => (
-                        <TouchableOpacity
-                          key={index}
-                          style={styles.categoryCard}
-                          onPress={() => handleTrendingPick(category.query)}
-                        >
-                          <Text style={styles.categoryIcon}>{category.icon}</Text>
-                          <Text style={styles.categoryName}>{category.name}</Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  </View>
-                </>
-              )}
-            </View>
+                </View>
+              </View>
+            </>
           )}
-
-          {/* Map Section */}
-          <View style={styles.mapSection}>
-            <View style={styles.mapHeader}>
-              <Text style={styles.mapTitle}>Map View</Text>
-              {selectedPlace && (
-                <TouchableOpacity
-                  style={styles.navigateButton}
-                  onPress={() => {
-                    if (location) {
-                      (navigation as any).navigate('Directions', {
-                        destination: selectedPlace,
-                        destinationName: 'Selected Location'
-                      });
-                    }
-                  }}
-                >
-                  <Text style={styles.navigateButtonText}>Navigate</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-            <View style={styles.mapContainer}>
-              <CustomMapView
-                initialRegion={addisAbabaRegion}
-                route={selectedPlace ? [selectedPlace] : undefined}
-                originLngLat={location ? [location.longitude, location.latitude] : undefined}
-                destinationLngLat={selectedPlace ? [selectedPlace.longitude, selectedPlace.latitude] : undefined}
-              />
-            </View>
-          </View>
         </View>
       </View>
     </CupertinoLayout>
@@ -359,32 +356,13 @@ const SearchScreen: React.FC = () => {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
 
-  // Header
-  header: {
-    padding: 24,
-    paddingTop: 60,
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.95)'
-  },
-  headerTitle: {
-    color: '#FFF',
-    fontSize: 28,
-    fontWeight: 'bold',
-    marginBottom: 8,
-    textAlign: 'center'
-  },
-  headerSubtitle: {
-    color: '#CCC',
-    fontSize: 16,
-    textAlign: 'center'
-  },
-
-  // Search Section
-  searchSection: {
+  // Top Section: Search Bar
+  topSection: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingHorizontal: 16,
+    paddingTop: 50,
+    paddingBottom: 16,
     backgroundColor: 'rgba(0,0,0,0.9)',
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.1)'
@@ -392,15 +370,15 @@ const styles = StyleSheet.create({
   searchContainer: {
     flex: 1,
     marginRight: 12,
-    borderRadius: 12
+    borderRadius: 10
   },
   voiceButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: 'rgba(0, 255, 255, 0.1)',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 25,
+    alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: 1,
     borderColor: 'rgba(0, 255, 255, 0.3)'
   },
@@ -408,27 +386,52 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 255, 255, 0.2)',
     borderColor: '#00FFFF'
   },
-  voiceIcon: { fontSize: 18, marginRight: 6 },
-  voiceText: { color: '#00FFFF', fontSize: 14, fontWeight: '500' },
+  voiceIcon: { fontSize: 20 },
 
-  // Content Area
-  contentArea: { flex: 1 },
-
-  // Results Section
-  resultsSection: {
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    maxHeight: 300
+  // Middle Section: Map
+  mapSection: {
+    flex: 2,
+    position: 'relative'
   },
-  sectionHeader: {
+  locateButton: {
+    position: 'absolute',
+    bottom: 100,
+    right: 16,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#00FFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#00FFFF',
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
+    zIndex: 10
+  },
+  locateIcon: { fontSize: 24 },
+
+  // Bottom Section: Results List
+  bottomSection: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.95)',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.1)'
+  },
+
+  // Results Header
+  resultsHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.1)'
   },
-  sectionTitle: {
+  resultsTitle: {
     color: '#FFF',
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '600'
   },
   loadingText: {
@@ -436,17 +439,25 @@ const styles = StyleSheet.create({
     fontSize: 14
   },
 
-  // Results List
-  resultsList: { marginBottom: 16 },
-  resultCard: {
+  // Results Scroll
+  resultsScroll: {
+    flex: 1,
+    paddingHorizontal: 20,
+    paddingVertical: 8
+  },
+
+  // Result Items
+  resultItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)'
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.05)'
+  },
+  resultLeft: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center'
   },
   resultIcon: {
     width: 40,
@@ -458,115 +469,119 @@ const styles = StyleSheet.create({
     marginRight: 12
   },
   resultIconText: { fontSize: 18 },
-  resultContent: { flex: 1 },
-  resultTitle: {
+  resultInfo: { flex: 1 },
+  resultName: {
     color: '#FFF',
     fontSize: 16,
     fontWeight: '600',
-    marginBottom: 4
+    marginBottom: 2
   },
-  resultSubtitle: {
+  resultAddress: {
     color: '#CCC',
     fontSize: 14
   },
-  resultAction: {
-    padding: 8,
-    borderRadius: 20,
-    backgroundColor: 'rgba(0,255,255,0.1)'
-  },
-  resultActionText: {
-    color: '#00FFFF',
-    fontSize: 16,
-    fontWeight: 'bold'
-  },
-
-  // Popular Places Grid
-  popularGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    marginBottom: 24
-  },
-  popularCard: {
-    width: '30%',
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    padding: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)'
-  },
-  popularIcon: { fontSize: 24, marginBottom: 8 },
-  popularName: {
-    color: '#FFF',
-    fontSize: 12,
-    textAlign: 'center',
-    lineHeight: 16,
-    fontWeight: '500'
-  },
-
-  // Categories Section
-  categoriesSection: { marginTop: 8 },
-  categoriesTitle: {
-    color: '#FFF',
-    fontSize: 18,
-    fontWeight: '600',
-    marginBottom: 16
-  },
-  categoriesGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between'
-  },
-  categoryCard: {
-    width: '30%',
+  resultNavigate: {
     backgroundColor: 'rgba(0,255,255,0.1)',
-    padding: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-    marginBottom: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: 'rgba(0,255,255,0.3)'
   },
-  categoryIcon: { fontSize: 24, marginBottom: 8 },
-  categoryName: {
+  navigateText: {
     color: '#00FFFF',
     fontSize: 14,
-    fontWeight: '600',
-    textAlign: 'center'
+    fontWeight: '600'
   },
 
-  // Map Section
-  mapSection: { flex: 1, paddingHorizontal: 20, paddingBottom: 20 },
-  mapHeader: {
+  // Popular Places
+  popularHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.1)'
   },
-  mapTitle: {
+  popularTitle: {
     color: '#FFF',
     fontSize: 18,
     fontWeight: '600'
   },
-  navigateButton: {
-    backgroundColor: '#00FFFF',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 25
-  },
-  navigateButtonText: {
-    color: '#000',
-    fontSize: 14,
-    fontWeight: '600'
-  },
-  mapContainer: {
+  popularScroll: {
     flex: 1,
-    borderRadius: 12,
-    overflow: 'hidden',
+    paddingHorizontal: 20,
+    paddingVertical: 8
+  },
+
+  // Popular Items
+  popularItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.05)'
+  },
+  popularLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1
+  },
+  popularIcon: { fontSize: 24, marginRight: 12 },
+  popularInfo: { flex: 1 },
+  popularName: {
+    color: '#FFF',
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 2
+  },
+  popularType: {
+    color: '#00FFFF',
+    fontSize: 12
+  },
+  popularArrow: {
+    color: '#CCC',
+    fontSize: 20,
+    fontWeight: 'bold'
+  },
+
+  // Categories
+  categoriesContainer: {
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.1)'
+  },
+  categoriesTitle: {
+    color: '#FFF',
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 12,
+    paddingHorizontal: 20
+  },
+  categoriesList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: 20
+  },
+  categoryItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 25,
+    marginRight: 12,
+    marginBottom: 8,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)'
+  },
+  categoryIcon: { fontSize: 16, marginRight: 8 },
+  categoryText: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: '500'
   }
 });
 
