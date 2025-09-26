@@ -1,13 +1,13 @@
-import React, { useState, useEffect, useRef, useContext } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, StyleSheet, TouchableOpacity, Text, TextInput, Platform } from 'react-native';
-// ScrollView and ActivityIndicator are provided by react-native-web in web builds; import dynamically
-import RNWeb from 'react-native';
-const ScrollView = (RNWeb as any).ScrollView || ((props: any) => <div {...props} />);
-const ActivityIndicator = (RNWeb as any).ActivityIndicator || (() => <Text style={{ color: '#00FFFF' }}>⏳</Text>);
+import AsyncStorage from '@react-native-async-storage/async-storage';
+// Import react-native as a namespace to safely access ScrollView/ActivityIndicator at runtime
+import * as RNWeb from 'react-native';
+const ScrollView: any = (RNWeb as any).ScrollView || (RNWeb as any).ScrollView || ((props: any) => <RNWeb.View {...props} />);
+const ActivityIndicator: any = (RNWeb as any).ActivityIndicator || (() => <Text style={{ color: '#00FFFF' }}>⏳</Text>);
 import CupertinoLayout from '../components/cupertino/CupertinoLayout';
 import { useLocation } from '../hooks/useLocation';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { RealtimeContext } from '../../App';
 
 type NominatimResult = {
   place_id: number | string;
@@ -136,9 +136,9 @@ const SearchScreen: React.FC = () => {
   const route = useRoute();
   const initialQuery = (route.params as any)?.initialQuery || '';
   const debounceRef = useRef<any>(null);
-
-  // Real-time WebSocket integration
-  const realtime = useContext(RealtimeContext);
+  const [recent, setRecent] = useState<string[]>([]);
+  const [focused, setFocused] = useState(false);
+  const [highlightIndex, setHighlightIndex] = useState<number>(-1);
 
   useEffect(() => {
     if (initialQuery && initialQuery.length > 0) {
@@ -149,20 +149,8 @@ const SearchScreen: React.FC = () => {
   useEffect(() => {
     if (location && location.latitude && location.longitude) {
       setCenter({ latitude: location.latitude, longitude: location.longitude });
-
-      // Send real-time location update
-      if (realtime?.sendLocationUpdate) {
-        realtime.sendLocationUpdate(location.latitude, location.longitude);
-      }
     }
-  }, [location, realtime]);
-
-  // Send search queries in real-time for collaborative features
-  useEffect(() => {
-    if (query.length > 2 && realtime?.sendSearchQuery) {
-      realtime.sendSearchQuery(query);
-    }
-  }, [query, realtime]);
+  }, [location]);
 
   const computeViewbox = (c: { latitude: number; longitude: number }, delta = 0.2) => {
     const minLat = c.latitude - delta;
@@ -200,6 +188,16 @@ const SearchScreen: React.FC = () => {
     debounceRef.current = setTimeout(() => fetchNominatim(text), 220);
   };
 
+  // Recommendation chips shown when input is empty or short
+  const recommendations = [
+    'Restaurants', 'Cafes', 'Gas Station', 'Hospital', 'University', 'Hotels'
+  ];
+
+  const onPickRecommendation = (t: string) => {
+    setQuery(t);
+    fetchNominatim(t);
+  };
+
   const onSelectSuggestion = (s: NominatimResult) => {
     const lat = parseFloat(s.lat);
     const lon = parseFloat(s.lon);
@@ -207,10 +205,54 @@ const SearchScreen: React.FC = () => {
     setCenter({ latitude: lat, longitude: lon });
     setQuery(s.display_name.split(',')[0]);
     setSuggestions([]);
+    // persist recent
+    try {
+      const title = s.display_name.split(',')[0];
+      const next = [title, ...recent.filter((r) => r !== title)].slice(0, 8);
+      setRecent(next);
+      AsyncStorage.setItem('recent_searches', JSON.stringify(next)).catch(() => {});
+    } catch (e) {}
     // navigate to Directions if desired
     // @ts-ignore
     navigation.navigate && (navigation as any).navigate('Directions', { destination: { latitude: lat, longitude: lon }, destinationName: s.display_name.split(',')[0] });
   };
+
+  // recent searches load
+  useEffect(() => {
+    AsyncStorage.getItem('recent_searches').then((v) => {
+      if (v) {
+        try { setRecent(JSON.parse(v)); } catch (e) {}
+      }
+    }).catch(() => {});
+  }, []);
+
+  // keyboard navigation for suggestions + recent list
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!focused) return;
+      const listLength = Math.max(suggestions.length, recent.length);
+      if (e.key === 'ArrowDown') {
+        setHighlightIndex((i) => Math.min(listLength - 1, i + 1));
+      } else if (e.key === 'ArrowUp') {
+        setHighlightIndex((i) => Math.max(-1, i - 1));
+      } else if (e.key === 'Enter') {
+        if (highlightIndex >= 0) {
+          const source = suggestions.length > 0 ? suggestions : recent.map((r) => ({ display_name: r, lat: '0', lon: '0', place_id: r } as any));
+          const sel = source[highlightIndex];
+          if (sel) {
+            if (sel.lat && sel.lon) onSelectSuggestion(sel as NominatimResult);
+            else { setQuery(sel.display_name); fetchNominatim(sel.display_name); }
+          }
+        }
+      }
+    };
+    // only add listener on web (KeyboardEvent is browser)
+    if (typeof window !== 'undefined') {
+      window.addEventListener('keydown', handler as any);
+      return () => window.removeEventListener('keydown', handler as any);
+    }
+    return () => {};
+  }, [focused, highlightIndex, suggestions, recent]);
 
   return (
     <CupertinoLayout>
@@ -235,30 +277,30 @@ const SearchScreen: React.FC = () => {
             />
             {loading && <ActivityIndicator style={{ marginLeft: 8 }} color="#00FFFF" />}
           </View>
-
-          {/* Real-time Status Bar */}
-          <View style={styles.statusBar}>
-            <View style={styles.statusItem}>
-              <Text style={[styles.statusDot, { backgroundColor: realtime?.isConnected ? '#00FF00' : '#FF0000' }]}>●</Text>
-              <Text style={styles.statusText}>
-                {realtime?.isConnected ? '🟢 Live' : '🔴 Offline'}
-              </Text>
+          {/* Recommendation chips */}
+          {(!query || query.length < 2) && (
+            <View>
+              <View style={styles.recommendationsRow}>
+                {recommendations.map((r) => (
+                  <TouchableOpacity key={r} style={styles.recoChip} onPress={() => onPickRecommendation(r)}>
+                    <Text style={styles.recoText}>{r}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              {recent.length > 0 && !query && (
+                <View style={{ marginTop: 8 }}>
+                  <Text style={{ color: '#AAA', marginBottom: 6 }}>Recent</Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+                    {recent.map((r) => (
+                      <TouchableOpacity key={r} style={styles.recoChip} onPress={() => { setQuery(r); fetchNominatim(r); }}>
+                        <Text style={styles.recoText}>{r}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+              )}
             </View>
-            <View style={styles.statusItem}>
-              <Text style={styles.statusText}>👥 {realtime?.onlineUsers?.length || 0} online</Text>
-            </View>
-            <TouchableOpacity
-              style={styles.emergencyButton}
-              onPress={() => {
-                if (location && realtime?.sendEmergency) {
-                  realtime.sendEmergency(location, 'navigation_help');
-                  alert('Emergency alert sent! Help is on the way.');
-                }
-              }}
-            >
-              <Text style={styles.emergencyText}>🚨 SOS</Text>
-            </TouchableOpacity>
-          </View>
+          )}
         </View>
 
         <View style={styles.mapSection}>
@@ -336,47 +378,7 @@ const styles = StyleSheet.create({
     borderBottomColor: 'rgba(255,255,255,0.1)'
   },
 
-  // Real-time Status Bar
-  statusBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)'
-  },
-  statusItem: {
-    flexDirection: 'row',
-    alignItems: 'center'
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: 6
-  },
-  statusText: {
-    color: '#FFF',
-    fontSize: 12,
-    fontWeight: '500'
-  },
-  emergencyButton: {
-    backgroundColor: '#FF4444',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 15,
-    borderWidth: 1,
-    borderColor: '#FF6666'
-  },
-  emergencyText: {
-    color: '#FFF',
-    fontSize: 12,
-    fontWeight: 'bold'
-  },
+  // Realtime UI removed
 
   // Top Section: Search Bar
   topSection: {
@@ -644,6 +646,23 @@ const styles = StyleSheet.create({
   dropTitle: { color: '#FFF', fontSize: 15, fontWeight: '600' },
   dropSubtitle: { color: '#9AA', fontSize: 12, marginTop: 2 },
   noResults: { padding: 12, alignItems: 'center' }
+  ,
+  recommendationsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginTop: 12
+  },
+  recoChip: {
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    marginRight: 8,
+    marginBottom: 8
+  },
+  recoText: { color: '#FFF', fontSize: 13 }
 });
 
 export default SearchScreen;
