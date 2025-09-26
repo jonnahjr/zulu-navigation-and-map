@@ -34,11 +34,15 @@ const SearchBar: React.FC<Props> = ({ onPlaceSelect, initialQuery = '', onSubmit
   const handleChange = (text: string) => {
     setQuery(text);
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    if (!text || text.length < 2) { setResults([]); return; }
-    // debounce 300ms
+    if (!text || text.length < 1) { setResults([]); return; }
+
+    // Real-time autocomplete: very short debounce (100ms) for instant feel
     debounceRef.current = setTimeout(async () => {
       try {
-        if (cacheRef.current[text]) { setResults(cacheRef.current[text]); return; }
+        if (cacheRef.current[text]) {
+          setResults(cacheRef.current[text]);
+          return;
+        }
         const res = await fetchAutocomplete(text);
         const trimmed = (res || []).slice(0, 10);
         cacheRef.current[text] = trimmed;
@@ -46,7 +50,7 @@ const SearchBar: React.FC<Props> = ({ onPlaceSelect, initialQuery = '', onSubmit
       } catch (e) {
         setResults([]);
       }
-    }, 300);
+    }, 100); // Reduced from 300ms to 100ms for more responsive feel
   };
 
   const handleCategory = async (type: string) => {

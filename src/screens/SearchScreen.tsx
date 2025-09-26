@@ -116,7 +116,16 @@ const SearchScreen: React.FC = () => {
 
   const handleQuery = async (q: string) => {
     setQuery(q);
-    if (!q || q.length < 2) {
+
+    // Show instant suggestions for any input length
+    if (!q || q.length < 1) {
+      setResults([]);
+      setIsLoading(false);
+      return;
+    }
+
+    // For very short queries, show instant suggestions without loading state
+    if (q.length < 2) {
       setResults([]);
       setIsLoading(false);
       return;
@@ -200,13 +209,13 @@ const SearchScreen: React.FC = () => {
       <View style={styles.container}>
         {/* Top: Search Bar */}
         <View style={styles.topSection}>
-          <BlurFallback style={styles.searchContainer}>
+          <View style={styles.searchContainer}>
             <SearchBar
               onPlaceSelect={handlePlaceSelect}
               initialQuery={initialQuery}
               onSubmit={handleSubmit}
             />
-          </BlurFallback>
+          </View>
           <TouchableOpacity
             style={[styles.voiceButton, voice.listening && styles.voiceButtonActive]}
             onPress={handleVoicePick}
@@ -237,9 +246,9 @@ const SearchScreen: React.FC = () => {
           </TouchableOpacity>
         </View>
 
-        {/* Bottom: List of results (scrollable) */}
+        {/* Bottom: List of results (scrollable) - Only show when user submits search */}
         <View style={styles.bottomSection}>
-          {results.length > 0 && (
+          {results.length > 0 && query.length > 2 && (
             <>
               <View style={styles.resultsHeader}>
                 <Text style={styles.resultsTitle}>Search Results</Text>
