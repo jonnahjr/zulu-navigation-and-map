@@ -239,7 +239,7 @@ const SearchScreen: React.FC = () => {
 
         {/* Bottom: List of results (scrollable) */}
         <View style={styles.bottomSection}>
-          {results.length > 0 ? (
+          {results.length > 0 && (
             <>
               <View style={styles.resultsHeader}>
                 <Text style={styles.resultsTitle}>Search Results</Text>
@@ -291,61 +291,6 @@ const SearchScreen: React.FC = () => {
                 ))}
               </View>
             </>
-          ) : (
-            <>
-              <View style={styles.popularHeader}>
-                <Text style={styles.popularTitle}>Popular Places</Text>
-              </View>
-              <View style={styles.popularScroll}>
-                {popularPlaces.map((place, index) => (
-                  <TouchableOpacity
-                    key={index}
-                    style={styles.popularItem}
-                    onPress={() => handlePlaceSelect(place.place_id || place.id, place.description || place.name)}
-                  >
-                    <View style={styles.popularLeft}>
-                      <Text style={styles.popularIcon}>
-                        {place.name?.includes('Museum') ? '🏛️' :
-                         place.name?.includes('Cathedral') ? '⛪' :
-                         place.name?.includes('Market') ? '🛒' :
-                         place.name?.includes('Hill') ? '🏔️' : '📍'}
-                      </Text>
-                      <View style={styles.popularInfo}>
-                        <Text style={styles.popularName} numberOfLines={1}>
-                          {place.name}
-                        </Text>
-                        <Text style={styles.popularType}>Popular</Text>
-                      </View>
-                    </View>
-                    <Text style={styles.popularArrow}>›</Text>
-                  </TouchableOpacity>
-                ))}
-
-                {/* Quick Search Categories */}
-                <View style={styles.categoriesContainer}>
-                  <Text style={styles.categoriesTitle}>Quick Search</Text>
-                  <View style={styles.categoriesList}>
-                    {[
-                      { name: 'Restaurants', icon: '🍽️', query: 'restaurants in Addis Ababa' },
-                      { name: 'Hotels', icon: '🏨', query: 'hotels in Addis Ababa' },
-                      { name: 'Banks', icon: '🏦', query: 'banks in Addis Ababa' },
-                      { name: 'Hospitals', icon: '🏥', query: 'hospitals in Addis Ababa' },
-                      { name: 'Shopping', icon: '🛍️', query: 'shopping in Addis Ababa' },
-                      { name: 'Transport', icon: '🚌', query: 'bus stations in Addis Ababa' }
-                    ].map((category, index) => (
-                      <TouchableOpacity
-                        key={index}
-                        style={styles.categoryItem}
-                        onPress={() => handleTrendingPick(category.query)}
-                      >
-                        <Text style={styles.categoryIcon}>{category.icon}</Text>
-                        <Text style={styles.categoryText}>{category.name}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </View>
-              </View>
-            </>
           )}
         </View>
       </View>
@@ -390,7 +335,7 @@ const styles = StyleSheet.create({
 
   // Middle Section: Map
   mapSection: {
-    flex: 2,
+    flex: 3,
     position: 'relative'
   },
   locateButton: {
@@ -413,10 +358,11 @@ const styles = StyleSheet.create({
 
   // Bottom Section: Results List
   bottomSection: {
-    flex: 1,
+    flex: 0.8,
     backgroundColor: 'rgba(0,0,0,0.95)',
     borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.1)'
+    borderTopColor: 'rgba(255,255,255,0.1)',
+    maxHeight: 300
   },
 
   // Results Header
